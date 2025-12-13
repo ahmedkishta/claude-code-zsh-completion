@@ -1,5 +1,63 @@
 #compdef claude
 
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp servers' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'installed plugins' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'session IDs' sessions
+}
 _claude() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
@@ -38,7 +96,7 @@ _claude() {
     '--append-system-prompt[Agregar prompt del sistema al prompt del sistema predeterminado]:prompt:'
     '--permission-mode[Modo de permisos a usar para la sesión]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
     '(-c --continue)'{-c,--continue}'[Continuar la conversación más reciente]'
-    '(-r --resume)'{-r,--resume}'[Reanudar una conversación - especificar ID de sesión o seleccionar interactivamente]:sessionId:'
+    '(-r --resume)'{-r,--resume}'[Reanudar una conversación - especificar ID de sesión o seleccionar interactivamente]:sessionId:_claude_sessions'
     '--fork-session[Crear nuevo ID de sesión en lugar de reutilizar el ID de sesión original al reanudar (con --resume o --continue)]'
     '--model[Modelo para la sesión actual. Especificar alias del modelo más reciente (ej., '\''sonnet'\'' o '\''opus'\'')]:model:'
     '--fallback-model[Habilitar respaldo automático al modelo especificado cuando el modelo predeterminado está sobrecargado (solo --print)]:model:'
@@ -131,7 +189,7 @@ _claude_mcp() {
           _arguments \
             '(-s --scope)'{-s,--scope}'[Ámbito de configuración (local, user, project) - eliminar del ámbito existente si no se especifica]:scope:(local user project)' \
             '(-h --help)'{-h,--help}'[Mostrar ayuda]' \
-            '1:name:'
+            '1:name:_claude_mcp_servers'
           ;;
         list)
           _arguments \
@@ -140,7 +198,7 @@ _claude_mcp() {
         get)
           _arguments \
             '(-h --help)'{-h,--help}'[Mostrar ayuda]' \
-            '1:name:'
+            '1:name:_claude_mcp_servers'
           ;;
         add-json)
           _arguments \
@@ -202,17 +260,17 @@ _claude_plugin() {
         install|i)
           _arguments \
             '(-h --help)'{-h,--help}'[Mostrar ayuda]' \
-            '1:plugin:'
+            '1:plugin:_claude_installed_plugins'
           ;;
         uninstall|remove)
           _arguments \
             '(-h --help)'{-h,--help}'[Mostrar ayuda]' \
-            '1:plugin:'
+            '1:plugin:_claude_installed_plugins'
           ;;
         enable|disable)
           _arguments \
             '(-h --help)'{-h,--help}'[Mostrar ayuda]' \
-            '1:plugin:'
+            '1:plugin:_claude_installed_plugins'
           ;;
       esac
       ;;
@@ -256,7 +314,7 @@ _claude_plugin_marketplace() {
         remove|rm)
           _arguments \
             '(-h --help)'{-h,--help}'[Mostrar ayuda]' \
-            '1:name:'
+            '1:name:_claude_mcp_servers'
           ;;
         update)
           _arguments \
@@ -275,4 +333,4 @@ _claude_install() {
     '::target:(stable latest)'
 }
 
-_claude "$@"
+(( $+_comps[claude] )) || compdef _claude claude

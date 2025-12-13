@@ -1,3 +1,5 @@
+[![Test Completion](https://github.com/1160054/claude-code-zsh-completion/actions/workflows/test.yml/badge.svg)](https://github.com/1160054/claude-code-zsh-completion/actions/workflows/test.yml)
+
 # claude-code-zsh-completion
 
 🚀 Zsh completion script for Claude Code CLI - intelligent auto-completion for all claude commands, options, and arguments
@@ -10,6 +12,8 @@
 - 🔌 Plugin marketplace operation completions
 - 🎯 Context-aware argument completion
 - 📝 Helpful descriptions for all commands and options
+- 🌍 Multi-language support (8 languages)
+- ⚡ Dynamic completion for MCP servers, plugins, and sessions
 
 ## Requirements
 
@@ -17,11 +21,28 @@
 - Claude Code CLI installed
 
 ## Installation
+
+### Choose Your Language
+
+Available languages:
+- `_claude` - English
+- `_claude.ja` - Japanese
+- `_claude.zh-CN` - Chinese (Simplified)
+- `_claude.es` - Spanish
+- `_claude.fr` - French
+- `_claude.de` - German
+- `_claude.ko` - Korean
+- `_claude.pt-BR` - Portuguese (Brazilian)
+
+### Install
+
 ```bash
-# Download and install
+# Download and install (English example)
 mkdir -p ~/.zsh/completions && curl -o ~/.zsh/completions/_claude \
   https://raw.githubusercontent.com/1160054/claude-code-zsh-completion/main/_claude
 ```
+
+For other languages, replace `_claude` with your preferred language file (e.g., `_claude.ja` for Japanese).
 
 Add the following to your `~/.zshrc` (if not already present):
 ```bash
@@ -48,7 +69,7 @@ claude --<TAB>            # Shows all available options
 claude plugin <TAB>       # Shows plugin subcommands
 ```
 
-### Examples
+### Basic Examples
 ```bash
 # Autocomplete main commands
 claude m<TAB>  →  claude mcp
@@ -66,6 +87,20 @@ add                      -- Add an MCP server to Claude Code
 remove                   -- Remove an MCP server
 list                     -- List configured MCP servers
 ...
+```
+
+### Dynamic Completion Examples
+```bash
+# MCP server completion (shows your configured servers)
+claude mcp remove <TAB>   # Shows: server1, server2, myserver, etc.
+claude mcp get <TAB>      # Shows: server1, server2, myserver, etc.
+
+# Plugin completion (shows your installed plugins)
+claude plugin uninstall <TAB>   # Shows your installed plugins
+claude plugin enable <TAB>      # Shows your installed plugins
+
+# Session ID completion (shows your available sessions)
+claude --resume <TAB>     # Shows: 12345678-abcd-..., 87654321-dcba-..., etc.
 ```
 
 ## Supported Commands

@@ -1,0 +1,43 @@
+name: Test Completion
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install zsh
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zsh
+
+    - name: Verify zsh installation
+      run: |
+        zsh --version
+        which zsh
+
+    - name: Run completion tests
+      run: |
+        chmod +x .github/workflows/test.zsh
+        zsh .github/workflows/test.zsh
+
+    - name: Test all language files syntax
+      run: |
+        echo "=== Testing all completion files ==="
+        for file in _claude*; do
+          echo "Testing $file..."
+          if zsh -n "$file"; then
+            echo "✓ $file syntax OK"
+          else
+            echo "✗ $file syntax error"
+            exit 1
+          fi
+        done

@@ -1,0 +1,7 @@
+# Zsh completion scripts
+_claude* linguist-language=Shell
+
+# Documentation (exclude from language stats)
+*.md linguist-documentation
+LICENSE linguist-documentation
+CHANGELOG.md linguist-documentation
