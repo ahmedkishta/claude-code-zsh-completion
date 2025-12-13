@@ -32,7 +32,7 @@ jobs:
     - name: Test all language files syntax
       run: |
         echo "=== Testing all completion files ==="
-        for file in _claude*; do
+        for file in completions/_claude*; do
           echo "Testing $file..."
           if zsh -n "$file"; then
             echo "✓ $file syntax OK"

@@ -2,7 +2,7 @@
 # Automated test script for Claude Code zsh completion
 
 SCRIPT_DIR="${0:A:h}/../.."
-COMPLETION_FILE="$SCRIPT_DIR/_claude"
+COMPLETION_FILE="$SCRIPT_DIR/completions/_claude"
 
 # Enable error handling but continue on expected errors
 setopt LOCAL_OPTIONS

@@ -12,7 +12,7 @@
 - 🔌 Plugin marketplace operation completions
 - 🎯 Context-aware argument completion
 - 📝 Helpful descriptions for all commands and options
-- 🌍 Multi-language support (8 languages)
+- 🌍 **Multi-language support (120+ languages)**
 - ⚡ Dynamic completion for MCP servers, plugins, and sessions
 
 ## Requirements
@@ -22,27 +22,15 @@
 
 ## Installation
 
-### Choose Your Language
-
-Available languages:
-- `_claude` - English
-- `_claude.ja` - Japanese
-- `_claude.zh-CN` - Chinese (Simplified)
-- `_claude.es` - Spanish
-- `_claude.fr` - French
-- `_claude.de` - German
-- `_claude.ko` - Korean
-- `_claude.pt-BR` - Portuguese (Brazilian)
-
-### Install
+### Quick Install
 
 ```bash
 # Download and install (English example)
 mkdir -p ~/.zsh/completions && curl -o ~/.zsh/completions/_claude \
-  https://raw.githubusercontent.com/1160054/claude-code-zsh-completion/main/_claude
+  https://raw.githubusercontent.com/1160054/claude-code-zsh-completion/main/completions/_claude
 ```
 
-For other languages, replace `_claude` with your preferred language file (e.g., `_claude.ja` for Japanese).
+For other languages, replace `_claude` with your preferred language file. See [Available Languages](#available-languages) below.
 
 Add the following to your `~/.zshrc` (if not already present):
 ```bash
@@ -58,6 +46,12 @@ Reload your shell:
 ```bash
 source ~/.zshrc
 ```
+
+## Available Languages
+
+**120+ languages supported!** All completion files are located in the [`completions/`](completions/) directory.
+
+For other languages, replace `_claude` with your preferred language file (e.g., `_claude.ja` for Japanese, `_claude.es` for Spanish).
 
 ## Usage
 
@@ -153,11 +147,7 @@ chmod 644 ~/.zsh/completions/_claude
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 
@@ -167,6 +157,7 @@ This project is licensed under the MIT License—see the [LICENSE](LICENSE) file
 
 - Based on the official Claude Code CLI documentation
 - Inspired by the Zsh completion system
+- Community translations from contributors worldwide
 
 ## Links
 

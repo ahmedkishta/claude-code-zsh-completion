@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2025-12-13
+
+### Added
+- **120+ language support** - Expanded from 8 to 120+ languages
+  - All major world languages
+  - Regional variants (English: 10, Spanish: 13, German: 4, French: 4, Swedish: 3, etc.)
+  - Minority and constructed languages (Esperanto, Celtic languages, etc.)
+- **New directory structure** - All completion files moved to `completions/` directory
+  - Better organization for large number of language files
+  - Cleaner repository root directory
+
+### Changed
+- **BREAKING: Installation path updated** - Completion files now in `completions/` directory
+  - Old: `https://raw.githubusercontent.com/.../main/_claude`
+  - New: `https://raw.githubusercontent.com/.../main/completions/_claude`
+  - Existing users need to update their installation path
+- Updated README with comprehensive language list and new structure
+- Updated installation instructions for new directory structure
+- Updated `.gitattributes` to recognize new directory structure
+- Updated GitHub Actions test paths
+
 ## [1.1.0] - 2025-12-13
 
 ### Added
