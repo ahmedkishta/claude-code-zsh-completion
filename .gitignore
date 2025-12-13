@@ -1,0 +1,3 @@
+# Zsh cache
+.zcompdump*
+*.zwc
