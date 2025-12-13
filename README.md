@@ -1,4 +1,7 @@
 [![Test Completion](https://github.com/1160054/claude-code-zsh-completion/actions/workflows/test.yml/badge.svg)](https://github.com/1160054/claude-code-zsh-completion/actions/workflows/test.yml)
+[![GitHub release](https://img.shields.io/github/v/release/1160054/claude-code-zsh-completion)](https://github.com/1160054/claude-code-zsh-completion/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Languages](https://img.shields.io/badge/languages-120+-blue.svg)](https://github.com/1160054/claude-code-zsh-completion/tree/main/completions)
 
 # claude-code-zsh-completion
 
