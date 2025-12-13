@@ -1,0 +1,278 @@
+#compdef claude
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:MCPサーバーの設定と管理'
+    'plugin:Claude Codeプラグインの管理'
+    'migrate-installer:グローバルnpmインストールからローカルインストールへ移行'
+    'setup-token:長期認証トークンの設定（Claude サブスクリプション必要）'
+    'doctor:Claude Code自動アップデーターの健全性チェック'
+    'update:アップデートの確認とインストール'
+    'install:Claude Codeネイティブビルドのインストール'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[オプションのカテゴリフィルタリング付きデバッグモード有効化（例："api,hooks" または "!statsig,!file"）]:filter:'
+    '--verbose[設定ファイルの詳細モード設定を上書き]'
+    '(-p --print)'{-p,--print}'[レスポンスを出力して終了（パイプで使用可）。注：信頼できるディレクトリのみで使用]'
+    '--output-format[出力フォーマット（--printと併用）："text"（デフォルト）、"json"（単一結果）、"stream-json"（リアルタイムストリーミング）]:format:(text json stream-json)'
+    '--json-schema[構造化出力検証用JSONスキーマ]:schema:'
+    '--include-partial-messages[到着時に部分的なメッセージチャンクを含める（--printと--output-format=stream-jsonと併用）]'
+    '--input-format[入力フォーマット（--printと併用）："text"（デフォルト）、または "stream-json"（リアルタイムストリーミング入力）]:format:(text stream-json)'
+    '--mcp-debug[\[非推奨。代わりに--debugを使用\] MCPデバッグモード有効化（MCPサーバーエラーを表示）]'
+    '--dangerously-skip-permissions[すべての権限チェックをバイパス。インターネットアクセスのないサンドボックスのみ推奨]'
+    '--allow-dangerously-skip-permissions[デフォルトで有効にせず、権限チェックのバイパスをオプションとして有効化]'
+    '--replay-user-messages[stdinからのユーザーメッセージをstdoutで確認のため再送信]'
+    '--allowed-tools[許可するツール名のカンマまたはスペース区切りリスト（例："Bash(git:*) Edit"）]:tools:'
+    '--allowedTools[許可するツール名のカンマまたはスペース区切りリスト（キャメルケース形式）]:tools:'
+    '--tools[組み込みセットから利用可能なツールのリストを指定。--printモードのみ]:tools:'
+    '--disallowed-tools[拒否するツール名のカンマまたはスペース区切りリスト（例："Bash(git:*) Edit"）]:tools:'
+    '--disallowedTools[拒否するツール名のカンマまたはスペース区切りリスト（キャメルケース形式）]:tools:'
+    '--mcp-config[JSONファイルまたは文字列からMCPサーバーを読み込む（スペース区切り）]:configs:'
+    '--system-prompt[セッションで使用するシステムプロンプト]:prompt:'
+    '--append-system-prompt[デフォルトのシステムプロンプトにシステムプロンプトを追加]:prompt:'
+    '--permission-mode[セッションで使用する権限モード]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[最新の会話を続ける]'
+    '(-r --resume)'{-r,--resume}'[会話を再開 - セッションIDを指定するか、対話的に選択]:sessionId:'
+    '--fork-session[再開時、元のセッションIDを再利用せず新しいセッションIDを作成（--resumeまたは--continueと併用）]'
+    '--model[現在のセッション用モデル。最新モデルのエイリアス（例：'\''sonnet'\''または'\''opus'\''）を指定]:model:'
+    '--fallback-model[デフォルトモデルが過負荷時に指定モデルへ自動フォールバック有効化（--printのみ）]:model:'
+    '--settings[設定JSONファイルへのパスまたは追加設定を読み込むJSON文字列]:file-or-json:_files'
+    '--add-dir[ツールアクセスを許可する追加ディレクトリ]:directories:_directories'
+    '--ide[正確に1つの有効なIDEが利用可能な場合、起動時に自動接続]'
+    '--strict-mcp-config[--mcp-configのMCPサーバーのみ使用し、他のすべてのMCP設定を無視]'
+    '--session-id[会話で使用する特定のセッションID（有効なUUIDである必要あり）]:uuid:'
+    '--agents[カスタムエージェントを定義するJSONオブジェクト]:json:'
+    '--setting-sources[読み込む設定ソースのカンマ区切りリスト（user, project, local）]:sources:'
+    '--plugin-dir[このセッションのみプラグインを読み込むディレクトリ（繰り返し可能）]:paths:_directories'
+    '(-v --version)'{-v,--version}'[バージョン番号を出力]'
+    '(-h --help)'{-h,--help}'[コマンドのヘルプを表示]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claudeコマンド' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "引数なし"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Claude Code MCPサーバーを起動'
+    'add:MCPサーバーをClaude Codeに追加'
+    'remove:MCPサーバーを削除'
+    'list:設定済みMCPサーバーを一覧表示'
+    'get:MCPサーバーの詳細を取得'
+    'add-json:JSON文字列でMCPサーバー（stdioまたはSSE）を追加'
+    'add-from-claude-desktop:Claude DesktopからMCPサーバーをインポート（MacとWSLのみ）'
+    'reset-project-choices:このプロジェクト内のすべての承認済み・拒否済みプロジェクトスコープ（.mcp.json）サーバーをリセット'
+    'help:ヘルプを表示'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp コマンド' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[デバッグモードを有効化]' \
+            '--verbose[設定ファイルの詳細モード設定を上書き]' \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[設定スコープ（local, user, project）]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[トランスポートタイプ（stdio, sse, http）]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[環境変数を設定（例：-e KEY=value）]:env:' \
+            '(-H --header)'{-H,--header}'[WebSocketヘッダーを設定]:header:' \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[設定スコープ（local, user, project） - 未指定の場合は存在するスコープから削除]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:name:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:name:'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[設定スコープ（local, user, project）]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[設定スコープ（local, user, project）]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:プラグインまたはマーケットプレイスマニフェストを検証'
+    'marketplace:Claude Codeマーケットプレイスを管理'
+    'install:利用可能なマーケットプレイスからプラグインをインストール'
+    'i:利用可能なマーケットプレイスからプラグインをインストール（installの短縮形）'
+    'uninstall:インストール済みプラグインをアンインストール'
+    'remove:インストール済みプラグインをアンインストール（uninstallのエイリアス）'
+    'enable:無効化されたプラグインを有効化'
+    'disable:有効化されたプラグインを無効化'
+    'help:ヘルプを表示'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin コマンド' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:plugin:'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:plugin:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:URL、パス、GitHubリポジトリからマーケットプレイスを追加'
+    'list:設定済みマーケットプレイスを一覧表示'
+    'remove:設定済みマーケットプレイスを削除'
+    'rm:設定済みマーケットプレイスを削除（removeのエイリアス）'
+    'update:ソースからマーケットプレイスを更新 - 名前未指定の場合はすべて更新'
+    'help:ヘルプを表示'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace コマンド' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[すでにインストール済みでも強制的にインストール]' \
+    '(-h --help)'{-h,--help}'[ヘルプを表示]' \
+    '::target:(stable latest)'
+}
+
+_claude "$@"

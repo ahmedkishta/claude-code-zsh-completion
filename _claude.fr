@@ -1,0 +1,278 @@
+#compdef claude
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Configurer et gérer les serveurs MCP'
+    'plugin:Gérer les plugins Claude Code'
+    'migrate-installer:Migrer de l'\''installation npm globale vers l'\''installation locale'
+    'setup-token:Configurer le jeton d'\''authentification à long terme (nécessite un abonnement Claude)'
+    'doctor:Vérification de santé du système de mise à jour automatique de Claude Code'
+    'update:Vérifier et installer les mises à jour'
+    'install:Installer la version native de Claude Code'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Activer le mode débogage avec filtrage optionnel par catégorie (ex. "api,hooks" ou "!statsig,!file")]:filter:'
+    '--verbose[Remplacer le paramètre de mode détaillé du fichier de configuration]'
+    '(-p --print)'{-p,--print}'[Afficher la réponse et quitter (pour utilisation avec pipes). Note: utiliser uniquement dans des répertoires de confiance]'
+    '--output-format[Format de sortie (avec --print): "text" (par défaut), "json" (résultat unique) ou "stream-json" (diffusion en temps réel)]:format:(text json stream-json)'
+    '--json-schema[Schéma JSON pour la validation de sortie structurée]:schema:'
+    '--include-partial-messages[Inclure les fragments de messages partiels dès leur arrivée (avec --print et --output-format=stream-json)]'
+    '--input-format[Format d'\''entrée (avec --print): "text" (par défaut) ou "stream-json" (entrée en flux temps réel)]:format:(text stream-json)'
+    '--mcp-debug[\[Obsolète. Utiliser --debug à la place\] Activer le mode débogage MCP (affiche les erreurs du serveur MCP)]'
+    '--dangerously-skip-permissions[Contourner toutes les vérifications de permissions. Recommandé uniquement pour les bacs à sable sans accès Internet]'
+    '--allow-dangerously-skip-permissions[Activer l'\''option de contournement des vérifications de permissions sans l'\''activer par défaut]'
+    '--replay-user-messages[Renvoyer les messages utilisateur depuis stdin sur stdout pour confirmation]'
+    '--allowed-tools[Liste séparée par des virgules ou des espaces de noms d'\''outils autorisés (ex. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Liste séparée par des virgules ou des espaces de noms d'\''outils autorisés (format camelCase)]:tools:'
+    '--tools[Spécifier la liste des outils disponibles depuis l'\''ensemble intégré. Mode impression uniquement]:tools:'
+    '--disallowed-tools[Liste séparée par des virgules ou des espaces de noms d'\''outils interdits (ex. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Liste séparée par des virgules ou des espaces de noms d'\''outils interdits (format camelCase)]:tools:'
+    '--mcp-config[Charger les serveurs MCP depuis un fichier JSON ou une chaîne (séparés par des espaces)]:configs:'
+    '--system-prompt[Invite système à utiliser pour la session]:prompt:'
+    '--append-system-prompt[Ajouter une invite système à l'\''invite système par défaut]:prompt:'
+    '--permission-mode[Mode de permissions à utiliser pour la session]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Continuer la conversation la plus récente]'
+    '(-r --resume)'{-r,--resume}'[Reprendre une conversation - spécifier l'\''ID de session ou sélectionner interactivement]:sessionId:'
+    '--fork-session[Créer un nouvel ID de session au lieu de réutiliser l'\''ID de session original lors de la reprise (avec --resume ou --continue)]'
+    '--model[Modèle pour la session actuelle. Spécifier un alias du modèle le plus récent (ex. '\''sonnet'\'' ou '\''opus'\'')]:model:'
+    '--fallback-model[Activer le basculement automatique vers le modèle spécifié lorsque le modèle par défaut est surchargé (--print uniquement)]:model:'
+    '--settings[Chemin vers le fichier JSON de paramètres ou chaîne JSON pour charger des paramètres supplémentaires]:file-or-json:_files'
+    '--add-dir[Répertoires supplémentaires pour autoriser l'\''accès aux outils]:directories:_directories'
+    '--ide[Se connecter automatiquement à l'\''IDE au démarrage si exactement un IDE valide est disponible]'
+    '--strict-mcp-config[Utiliser uniquement les serveurs MCP de --mcp-config et ignorer tous les autres paramètres MCP]'
+    '--session-id[ID de session spécifique à utiliser pour la conversation (doit être un UUID valide)]:uuid:'
+    '--agents[Objet JSON définissant des agents personnalisés]:json:'
+    '--setting-sources[Liste séparée par des virgules de sources de paramètres à charger (user, project, local)]:sources:'
+    '--plugin-dir[Répertoire depuis lequel charger les plugins pour cette session uniquement (répétable)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Afficher le numéro de version]'
+    '(-h --help)'{-h,--help}'[Afficher l'\''aide de la commande]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'commandes claude' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "aucun argument"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Démarrer un serveur MCP Claude Code'
+    'add:Ajouter un serveur MCP à Claude Code'
+    'remove:Supprimer un serveur MCP'
+    'list:Lister les serveurs MCP configurés'
+    'get:Obtenir les détails du serveur MCP'
+    'add-json:Ajouter un serveur MCP (stdio ou SSE) avec une chaîne JSON'
+    'add-from-claude-desktop:Importer des serveurs MCP depuis Claude Desktop (Mac et WSL uniquement)'
+    'reset-project-choices:Réinitialiser tous les serveurs de portée projet (.mcp.json) approuvés/refusés dans ce projet'
+    'help:Afficher l'\''aide'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'commandes mcp' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Activer le mode débogage]' \
+            '--verbose[Remplacer le paramètre de mode détaillé du fichier de configuration]' \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Portée de configuration (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Type de transport (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Définir une variable d'\''environnement (ex. -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Définir un en-tête WebSocket]:header:' \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Portée de configuration (local, user, project) - supprimer de la portée existante si non spécifié]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:name:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:name:'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Portée de configuration (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Portée de configuration (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Valider un plugin ou un manifeste de marketplace'
+    'marketplace:Gérer les marketplaces Claude Code'
+    'install:Installer un plugin depuis les marketplaces disponibles'
+    'i:Installer un plugin depuis les marketplaces disponibles (abréviation de install)'
+    'uninstall:Désinstaller un plugin installé'
+    'remove:Désinstaller un plugin installé (alias de uninstall)'
+    'enable:Activer un plugin désactivé'
+    'disable:Désactiver un plugin activé'
+    'help:Afficher l'\''aide'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'commandes plugin' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:plugin:'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:plugin:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Ajouter un marketplace depuis une URL, un chemin ou un dépôt GitHub'
+    'list:Lister les marketplaces configurés'
+    'remove:Supprimer un marketplace configuré'
+    'rm:Supprimer un marketplace configuré (alias de remove)'
+    'update:Mettre à jour le marketplace depuis la source - mettre à jour tous si aucun nom spécifié'
+    'help:Afficher l'\''aide'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'commandes marketplace' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Forcer l'\''installation même si déjà installé]' \
+    '(-h --help)'{-h,--help}'[Afficher l'\''aide]' \
+    '::target:(stable latest)'
+}
+
+_claude "$@"

@@ -1,0 +1,278 @@
+#compdef claude
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:配置和管理MCP服务器'
+    'plugin:管理Claude Code插件'
+    'migrate-installer:从全局npm安装迁移到本地安装'
+    'setup-token:设置长期身份验证令牌（需要Claude订阅）'
+    'doctor:Claude Code自动更新器健康检查'
+    'update:检查并安装更新'
+    'install:安装Claude Code原生构建'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[启用调试模式，可选类别过滤（例如："api,hooks"或"!statsig,!file"）]:filter:'
+    '--verbose[覆盖配置文件中的详细模式设置]'
+    '(-p --print)'{-p,--print}'[打印响应并退出（用于管道）。注意：仅在受信任的目录中使用]'
+    '--output-format[输出格式（与--print一起使用）："text"（默认）、"json"（单个结果）或"stream-json"（实时流式传输）]:format:(text json stream-json)'
+    '--json-schema[用于结构化输出验证的JSON模式]:schema:'
+    '--include-partial-messages[在消息到达时包含部分消息块（与--print和--output-format=stream-json一起使用）]'
+    '--input-format[输入格式（与--print一起使用）："text"（默认）或"stream-json"（实时流式输入）]:format:(text stream-json)'
+    '--mcp-debug[\[已弃用。请改用--debug\] 启用MCP调试模式（显示MCP服务器错误）]'
+    '--dangerously-skip-permissions[绕过所有权限检查。仅建议在没有互联网访问的沙箱中使用]'
+    '--allow-dangerously-skip-permissions[启用绕过权限检查的选项，但默认不启用]'
+    '--replay-user-messages[在stdout上重新发送来自stdin的用户消息以进行确认]'
+    '--allowed-tools[允许的工具名称的逗号或空格分隔列表（例如："Bash(git:*) Edit"）]:tools:'
+    '--allowedTools[允许的工具名称的逗号或空格分隔列表（驼峰命名格式）]:tools:'
+    '--tools[从内置集中指定可用工具列表。仅打印模式]:tools:'
+    '--disallowed-tools[禁止的工具名称的逗号或空格分隔列表（例如："Bash(git:*) Edit"）]:tools:'
+    '--disallowedTools[禁止的工具名称的逗号或空格分隔列表（驼峰命名格式）]:tools:'
+    '--mcp-config[从JSON文件或字符串加载MCP服务器（空格分隔）]:configs:'
+    '--system-prompt[会话使用的系统提示]:prompt:'
+    '--append-system-prompt[将系统提示附加到默认系统提示]:prompt:'
+    '--permission-mode[会话使用的权限模式]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[继续最近的对话]'
+    '(-r --resume)'{-r,--resume}'[恢复对话 - 指定会话ID或交互式选择]:sessionId:'
+    '--fork-session[恢复时创建新的会话ID而不是重用原始会话ID（与--resume或--continue一起使用）]'
+    '--model[当前会话的模型。指定最新模型的别名（例如，'\''sonnet'\''或'\''opus'\''）]:model:'
+    '--fallback-model[当默认模型过载时启用自动回退到指定模型（仅--print）]:model:'
+    '--settings[设置JSON文件的路径或用于加载其他设置的JSON字符串]:file-or-json:_files'
+    '--add-dir[允许工具访问的其他目录]:directories:_directories'
+    '--ide[如果恰好有一个有效的IDE可用，则在启动时自动连接到IDE]'
+    '--strict-mcp-config[仅使用--mcp-config中的MCP服务器并忽略所有其他MCP设置]'
+    '--session-id[用于对话的特定会话ID（必须是有效的UUID）]:uuid:'
+    '--agents[定义自定义代理的JSON对象]:json:'
+    '--setting-sources[要加载的设置源的逗号分隔列表（user, project, local）]:sources:'
+    '--plugin-dir[仅为此会话加载插件的目录（可重复）]:paths:_directories'
+    '(-v --version)'{-v,--version}'[输出版本号]'
+    '(-h --help)'{-h,--help}'[显示命令帮助]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude命令' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "无参数"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:启动Claude Code MCP服务器'
+    'add:向Claude Code添加MCP服务器'
+    'remove:删除MCP服务器'
+    'list:列出已配置的MCP服务器'
+    'get:获取MCP服务器详细信息'
+    'add-json:使用JSON字符串添加MCP服务器（stdio或SSE）'
+    'add-from-claude-desktop:从Claude Desktop导入MCP服务器（仅限Mac和WSL）'
+    'reset-project-choices:重置此项目中所有已批准/拒绝的项目范围（.mcp.json）服务器'
+    'help:显示帮助'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[显示帮助]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp命令' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[启用调试模式]' \
+            '--verbose[覆盖配置文件中的详细模式设置]' \
+            '(-h --help)'{-h,--help}'[显示帮助]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[配置范围（local, user, project）]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[传输类型（stdio, sse, http）]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[设置环境变量（例如，-e KEY=value）]:env:' \
+            '(-H --header)'{-H,--header}'[设置WebSocket标头]:header:' \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[配置范围（local, user, project） - 如果未指定则从现有范围中删除]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:name:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:name:'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[配置范围（local, user, project）]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[配置范围（local, user, project）]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[显示帮助]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:验证插件或市场清单'
+    'marketplace:管理Claude Code市场'
+    'install:从可用市场安装插件'
+    'i:从可用市场安装插件（install的简写）'
+    'uninstall:卸载已安装的插件'
+    'remove:卸载已安装的插件（uninstall的别名）'
+    'enable:启用已禁用的插件'
+    'disable:禁用已启用的插件'
+    'help:显示帮助'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[显示帮助]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin命令' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:plugin:'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:plugin:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:从URL、路径或GitHub存储库添加市场'
+    'list:列出已配置的市场'
+    'remove:删除已配置的市场'
+    'rm:删除已配置的市场（remove的别名）'
+    'update:从源更新市场 - 如果未指定名称则更新所有'
+    'help:显示帮助'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[显示帮助]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace命令' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[显示帮助]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[即使已安装也强制安装]' \
+    '(-h --help)'{-h,--help}'[显示帮助]' \
+    '::target:(stable latest)'
+}
+
+_claude "$@"
