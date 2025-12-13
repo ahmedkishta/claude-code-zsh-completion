@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp servers' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'installed plugins' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'session IDs' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:MCP სერვერების კონფიგურაცია და მართვა'
+    'plugin:Claude Code დამატებების მართვა'
+    'migrate-installer:გლობალური npm ინსტალაციიდან ლოკალურზე გადასვლა'
+    'setup-token:გრძელვადიანი ავთენტიფიკაციის ტოკენის დაყენება (საჭიროებს Claude გამოწერას)'
+    'doctor:Claude Code ავტომატური განახლების ჯანმრთელობის შემოწმება'
+    'update:განახლებების შემოწმება და ინსტალაცია'
+    'install:Claude Code ნატიურ ბილდის ინსტალაცია'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[დებაგ რეჟიმის ჩართვა კატეგორიების ფილტრაციით (მაგ., "api,hooks" ან "!statsig,!file")]:filter:'
+    '--verbose[ვერბოზ რეჟიმის პარამეტრის გადაფარვა კონფიგურაციის ფაილიდან]'
+    '(-p --print)'{-p,--print}'[პასუხის დაბეჭდვა და გასვლა (pipe-ებთან გამოსაყენებლად). შენიშვნა: გამოიყენეთ მხოლოდ სანდო დირექტორიებში]'
+    '--output-format[გამოტანის ფორმატი (--print-თან): "text" (ნაგულისხმევი), "json" (ცალკე შედეგი), ან "stream-json" (რეალურ დროში სტრიმინგი)]:format:(text json stream-json)'
+    '--json-schema[JSON სქემა სტრუქტურირებული გამოტანის ვალიდაციისთვის]:schema:'
+    '--include-partial-messages[ნაწილობრივი შეტყობინებების ჩართვა (--print და --output-format=stream-json-თან)]'
+    '--input-format[შეტანის ფორმატი (--print-თან): "text" (ნაგულისხმევი) ან "stream-json" (რეალურ დროში სტრიმინგი)]:format:(text stream-json)'
+    '--mcp-debug[მოძველებული. გამოიყენეთ --debug] MCP დებაგ რეჟიმის ჩართვა (აჩვენებს MCP სერვერის შეცდომებს)]'
+    '--dangerously-skip-permissions[ყველა ნებართვის შემოწმების გვერდის ავლა. რეკომენდებულია მხოლოდ ინტერნეტის გარეშე sandbox გარემოებისთვის]'
+    '--allow-dangerously-skip-permissions[ნებართვის შემოწმების გვერდის ავლის ოფციის ჩართვა ნაგულისხმევად გააქტიურების გარეშე]'
+    '--replay-user-messages[მომხმარებლის შეტყობინებების ხელახალი გაგზავნა stdin-დან stdout-ზე დასადასტურებლად]'
+    '--allowed-tools[მძიმით ან სივრცით გამოყოფილი დაშვებული ინსტრუმენტების სია (მაგ., "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[მძიმით ან სივრცით გამოყოფილი დაშვებული ინსტრუმენტების სია (camelCase ფორმატი)]:tools:'
+    '--tools[ხელმისაწვდომი ინსტრუმენტების სიის მითითება ჩაშენებული ნაკრებიდან. მხოლოდ print რეჟიმი]:tools:'
+    '--disallowed-tools[მძიმით ან სივრცით გამოყოფილი აკრძალული ინსტრუმენტების სია (მაგ., "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[მძიმით ან სივრცით გამოყოფილი აკრძალული ინსტრუმენტების სია (camelCase ფორმატი)]:tools:'
+    '--mcp-config[MCP სერვერების ჩატვირთვა JSON ფაილიდან ან სტრიქონიდან (სივრცით გამოყოფილი)]:configs:'
+    '--system-prompt[სისტემური prompt სესიისთვის]:prompt:'
+    '--append-system-prompt[სისტემური prompt-ის დართვა ნაგულისხმევ სისტემურ prompt-ზე]:prompt:'
+    '--permission-mode[ნებართვის რეჟიმი სესიისთვის]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[ბოლო საუბრის გაგრძელება]'
+    '(-r --resume)'{-r,--resume}'[საუბრის განახლება - მიუთითეთ სესიის ID ან აირჩიეთ ინტერაქტიულად]:sessionId:_claude_sessions'
+    '--fork-session[ახალი სესიის ID-ის შექმნა ორიგინალის ხელახლა გამოყენების ნაცვლად (--resume ან --continue-თან)]'
+    '--model[მოდელი მიმდინარე სესიისთვის. მიუთითეთ ალიასი უახლესი მოდელისთვის (მაგ., '\''sonnet'\'' ან '\''opus'\'')]:model:'
+    '--fallback-model[ავტომატური გადასვლის ჩართვა მითითებულ მოდელზე როცა ნაგულისხმევი მოდელი გადატვირთულია (მხოლოდ --print)]:model:'
+    '--settings[პარამეტრების JSON ფაილის ან JSON სტრიქონის გზა დამატებითი პარამეტრების ჩასატვირთად]:file-or-json:_files'
+    '--add-dir[დამატებითი დირექტორიები ინსტრუმენტების წვდომისთვის]:directories:_directories'
+    '--ide[ავტომატური დაკავშირება IDE-სთან გაშვებისას თუ ხელმისაწვდომია ზუსტად ერთი ვალიდური IDE]'
+    '--strict-mcp-config[გამოიყენეთ მხოლოდ MCP სერვერები --mcp-config-დან და იგნორირება სხვა MCP პარამეტრების]'
+    '--session-id[სპეციფიკური სესიის ID საუბრისთვის (უნდა იყოს ვალიდური UUID)]:uuid:'
+    '--agents[JSON ობიექტი რომელიც განსაზღვრავს მორგებულ აგენტებს]:json:'
+    '--setting-sources[მძიმით გამოყოფილი პარამეტრების წყაროების სია ჩასატვირთად (user, project, local)]:sources:'
+    '--plugin-dir[დირექტორია დამატებების ჩასატვირთად მხოლოდ ამ სესიისთვის (განმეორებადი)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[ვერსიის ნომრის გამოტანა]'
+    '(-h --help)'{-h,--help}'[ბრძანების დახმარების ჩვენება]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude commands' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "no arguments"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Claude Code MCP სერვერის გაშვება'
+    'add:MCP სერვერის დამატება Claude Code-ში'
+    'remove:MCP სერვერის წაშლა'
+    'list:კონფიგურირებული MCP სერვერების სია'
+    'get:MCP სერვერის დეტალების მიღება'
+    'add-json:MCP სერვერის დამატება (stdio ან SSE) JSON სტრიქონით'
+    'add-from-claude-desktop:MCP სერვერების იმპორტი Claude Desktop-დან (მხოლოდ Mac და WSL)'
+    'reset-project-choices:პროექტის დონის (.mcp.json) ყველა დამტკიცებული/უარყოფილი სერვერის გადატვირთვა ამ პროექტში'
+    'help:დახმარების ჩვენება'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp commands' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[დებაგ რეჟიმის ჩართვა]' \
+            '--verbose[ვერბოზ რეჟიმის პარამეტრის გადაფარვა კონფიგურაციის ფაილიდან]' \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[კონფიგურაციის არეალი (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[ტრანსპორტის ტიპი (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[გარემოს ცვლადის დაყენება (მაგ., -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[WebSocket header-ის დაყენება]:header:' \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[კონფიგურაციის არეალი (local, user, project) - არსებული არეალიდან წაშლა თუ არ არის მითითებული]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[კონფიგურაციის არეალი (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[კონფიგურაციის არეალი (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:დამატების ან marketplace მანიფესტის ვალიდაცია'
+    'marketplace:Claude Code marketplace-ების მართვა'
+    'install:დამატების ინსტალაცია ხელმისაწვდომი marketplace-ებიდან'
+    'i:დამატების ინსტალაცია ხელმისაწვდომი marketplace-ებიდან (install-ის შემოკლება)'
+    'uninstall:დაინსტალირებული დამატების წაშლა'
+    'remove:დაინსტალირებული დამატების წაშლა (uninstall-ის ალიასი)'
+    'enable:გამორთული დამატების ჩართვა'
+    'disable:ჩართული დამატების გამორთვა'
+    'help:დახმარების ჩვენება'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin commands' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:marketplace-ის დამატება URL-დან, გზიდან ან GitHub რეპოზიტორიიდან'
+    'list:კონფიგურირებული marketplace-ების სია'
+    'remove:კონფიგურირებული marketplace-ის წაშლა'
+    'rm:კონფიგურირებული marketplace-ის წაშლა (remove-ის ალიასი)'
+    'update:marketplace-ის განახლება წყაროდან - ყველას განახლება თუ სახელი არ არის მითითებული'
+    'help:დახმარების ჩვენება'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace commands' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[იძულებითი ინსტალაცია თუ უკვე დაინსტალირებულია]' \
+    '(-h --help)'{-h,--help}'[დახმარების ჩვენება]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

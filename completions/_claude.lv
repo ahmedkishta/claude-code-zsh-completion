@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dinamiskas automātiskās pabeigšanas funkcijas
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Lasīšana tieši no konfigurācijas failiem, nevis izpildot 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Serveru nosaukumu izvilkšana no JSON (mcpServers sadaļa)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Rezerves variants: claude mcp list, ja konfigurācijas parsēšana neizdodas
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp serveri' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Spraudņu direktoriju pārbaude tieši
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Dublikātu noņemšana
+  plugins=(${(u)plugins})
+
+  _describe 'instalētie spraudņi' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Sesiju direktorija pārbaude
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # UUID izvilkšana tieši no failu nosaukumiem
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Tikai derīgu UUID filtrēšana
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'sesiju identifikatori' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Konfigurēt un pārvaldīt MCP serverus'
+    'plugin:Pārvaldīt Claude Code spraudņus'
+    'migrate-installer:Migrēt no globālās npm instalācijas uz lokālo instalāciju'
+    'setup-token:Iestatīt ilgtermiņa autentifikācijas pilnvaru (nepieciešams Claude abonements)'
+    'doctor:Pārbaudīt Claude Code automātiskās atjaunināšanas sistēmas darbspēju'
+    'update:Pārbaudīt un instalēt atjauninājumus'
+    'install:Instalēt vietējo Claude Code versiju'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Ieslēgt atkļūdošanas režīmu ar izvēles kategoriju filtrēšanu (piem., "api,hooks" vai "!statsig,!file")]:filter:'
+    '--verbose[Pārrakstīt detalizētā režīma iestatījumu no konfigurācijas faila]'
+    '(-p --print)'{-p,--print}'[Izdrukāt atbildi un iziet (lietošanai ar pipe). Piezīme: izmantojiet tikai uzticamās direktorijās]'
+    '--output-format[Izvades formāts (ar --print): "text" (noklusējuma), "json" (viens rezultāts), vai "stream-json" (straumēšana reālajā laikā)]:format:(text json stream-json)'
+    '--json-schema[JSON shēma strukturētas izvades validācijai]:schema:'
+    '--include-partial-messages[Iekļaut daļējos ziņojumu fragmentus to ierašanās laikā (ar --print un --output-format=stream-json)]'
+    '--input-format[Ievades formāts (ar --print): "text" (noklusējuma) vai "stream-json" (straumēta ievade reālajā laikā)]:format:(text stream-json)'
+    '--mcp-debug[\[Novecojis. Izmantojiet --debug tā vietā\] Ieslēgt MCP atkļūdošanas režīmu (rāda MCP servera kļūdas)]'
+    '--dangerously-skip-permissions[Apiet visas atļauju pārbaudes. Ieteicams tikai smilškastēm bez interneta piekļuves]'
+    '--allow-dangerously-skip-permissions[Iespējot atļauju pārbaužu apiešanas opciju bez iespējošanas pēc noklusējuma]'
+    '--replay-user-messages[Atkārtoti nosūtīt lietotāja ziņojumus no stdin uz stdout apstiprinājumam]'
+    '--allowed-tools[Atļauto rīku nosaukumu saraksts, atdalīts ar komatiem vai atstarpēm (piem., "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Atļauto rīku nosaukumu saraksts, atdalīts ar komatiem vai atstarpēm (camelCase formāts)]:tools:'
+    '--tools[Norādīt pieejamo rīku sarakstu no iebūvētā komplekta. Tikai print režīmā]:tools:'
+    '--disallowed-tools[Neatļauto rīku nosaukumu saraksts, atdalīts ar komatiem vai atstarpēm (piem., "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Neatļauto rīku nosaukumu saraksts, atdalīts ar komatiem vai atstarpēm (camelCase formāts)]:tools:'
+    '--mcp-config[Ielādēt MCP serverus no JSON faila vai virknes (atdalīti ar atstarpēm)]:configs:'
+    '--system-prompt[Sistēmas uzvedne lietošanai sesijā]:prompt:'
+    '--append-system-prompt[Pievienot sistēmas uzvedni noklusējuma sistēmas uzvednei]:prompt:'
+    '--permission-mode[Atļauju režīms lietošanai sesijā]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Turpināt pēdējo sarunu]'
+    '(-r --resume)'{-r,--resume}'[Atsākt sarunu - norādiet sesijas identifikatoru vai izvēlieties interaktīvi]:sessionId:_claude_sessions'
+    '--fork-session[Izveidot jaunu sesijas identifikatoru, nevis atkārtoti izmantot oriģinālo, atsākot (ar --resume vai --continue)]'
+    '--model[Modelis pašreizējai sesijai. Norādiet aizstājvārdu jaunākajam modelim (piem., '\''sonnet'\'' vai '\''opus'\'')]:model:'
+    '--fallback-model[Iespējot automātisko pārslēgšanos uz norādīto modeli, kad noklusējuma modelis ir pārslogots (tikai --print)]:model:'
+    '--settings[Ceļš uz JSON iestatījumu failu vai JSON virkni papildu iestatījumu ielādei]:file-or-json:_files'
+    '--add-dir[Papildu direktorijas rīku piekļuves nodrošināšanai]:directories:_directories'
+    '--ide[Automātiski savienoties ar IDE startēšanas laikā, ja ir pieejams tieši viens derīgs IDE]'
+    '--strict-mcp-config[Izmantot tikai MCP serverus no --mcp-config un ignorēt visus citus MCP iestatījumus]'
+    '--session-id[Konkrēts sesijas identifikators lietošanai sarunā (jābūt derīgam UUID)]:uuid:'
+    '--agents[JSON objekts, kas definē pielāgotus aģentus]:json:'
+    '--setting-sources[Iestatījumu avotu saraksts, atdalīts ar komatiem, ielādei (user, project, local)]:sources:'
+    '--plugin-dir[Direktorija spraudņu ielādei tikai šai sesijai (var atkārtot)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Izvadīt versijas numuru]'
+    '(-h --help)'{-h,--help}'[Rādīt palīdzību komandai]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude komandas' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "bez argumentiem"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Palaist Claude Code MCP serveri'
+    'add:Pievienot MCP serveri Claude Code'
+    'remove:Noņemt MCP serveri'
+    'list:Rādīt konfigurēto MCP serveru sarakstu'
+    'get:Iegūt MCP servera informāciju'
+    'add-json:Pievienot MCP serveri (stdio vai SSE) ar JSON virkni'
+    'add-from-claude-desktop:Importēt MCP serverus no Claude Desktop (tikai Mac un WSL)'
+    'reset-project-choices:Atiestatīt visus apstiprinātos/noraidītos projekta apjoma (.mcp.json) serverus šajā projektā'
+    'help:Rādīt palīdzību'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp komandas' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Ieslēgt atkļūdošanas režīmu]' \
+            '--verbose[Pārrakstīt detalizētā režīma iestatījumu no konfigurācijas faila]' \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurācijas apjoms (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Transporta tips (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Iestatīt vides mainīgo (piem., -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Iestatīt WebSocket galveni]:header:' \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurācijas apjoms (local, user, project) - noņemt no esošā apjoma, ja nav norādīts]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurācijas apjoms (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurācijas apjoms (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Validēt spraudni vai tirgus manifestu'
+    'marketplace:Pārvaldīt Claude Code tirgus'
+    'install:Instalēt spraudni no pieejamajiem tirgiem'
+    'i:Instalēt spraudni no pieejamajiem tirgiem (install saīsinājums)'
+    'uninstall:Noņemt instalēto spraudni'
+    'remove:Noņemt instalēto spraudni (uninstall sinonīms)'
+    'enable:Iespējot atspējotu spraudni'
+    'disable:Atspējot iespējotu spraudni'
+    'help:Rādīt palīdzību'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin komandas' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Pievienot tirgu no URL, ceļa vai GitHub krātuves'
+    'list:Rādīt konfigurēto tirgu sarakstu'
+    'remove:Noņemt konfigurēto tirgu'
+    'rm:Noņemt konfigurēto tirgu (remove sinonīms)'
+    'update:Atjaunināt tirgu no avota - atjaunināt visus, ja nosaukums nav norādīts'
+    'help:Rādīt palīdzību'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace komandas' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Piespiedu instalācija, pat ja jau instalēts]' \
+    '(-h --help)'{-h,--help}'[Rādīt palīdzību]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamické funkcie automatického dopĺňania
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Čítanie priamo z konfiguračných súborov namiesto spúšťania 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extrakcia názvov serverov z JSON (sekcia mcpServers)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Záložná varianta: claude mcp list, ak parsovanie konfigurácie zlyhá
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp servery' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Kontrola adresárov pluginov priamo
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Odstránenie duplikátov
+  plugins=(${(u)plugins})
+
+  _describe 'nainštalované pluginy' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Kontrola adresára relácií
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extrakcia UUID priamo z názvov súborov
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filtrovanie len platných UUID
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'identifikátory relácií' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Konfigurácia a správa MCP serverov'
+    'plugin:Správa pluginov Claude Code'
+    'migrate-installer:Migrácia z globálnej npm inštalácie na lokálnu inštaláciu'
+    'setup-token:Nastavenie tokenu pre dlhodobú autentizáciu (vyžaduje predplatné Claude)'
+    'doctor:Kontrola zdravia systému automatických aktualizácií Claude Code'
+    'update:Kontrola a inštalácia aktualizácií'
+    'install:Inštalácia natívnej verzie Claude Code'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Zapnúť režim ladenia s voliteľným filtrovaním kategórií (napr. "api,hooks" alebo "!statsig,!file")]:filter:'
+    '--verbose[Prepísať nastavenie podrobného režimu z konfiguračného súboru]'
+    '(-p --print)'{-p,--print}'[Vypísať odpoveď a ukončiť (pre použitie s pipe). Poznámka: používajte len v dôveryhodných adresároch]'
+    '--output-format[Formát výstupu (s --print): "text" (predvolené), "json" (jeden výsledok), alebo "stream-json" (streamovanie v reálnom čase)]:format:(text json stream-json)'
+    '--json-schema[JSON schéma pre validáciu štruktúrovaného výstupu]:schema:'
+    '--include-partial-messages[Zahrnúť čiastočné fragmenty správ pri ich príchode (s --print a --output-format=stream-json)]'
+    '--input-format[Formát vstupu (s --print): "text" (predvolené) alebo "stream-json" (streamovaný vstup v reálnom čase)]:format:(text stream-json)'
+    '--mcp-debug[\[Zastarané. Použite --debug namiesto toho\] Zapnúť režim ladenia MCP (zobrazuje chyby MCP servera)]'
+    '--dangerously-skip-permissions[Obísť všetky kontroly oprávnení. Odporúčané len pre sandboxové prostredia bez prístupu k internetu]'
+    '--allow-dangerously-skip-permissions[Povoliť možnosť obídenia kontrol oprávnení bez povolenia v predvolenom nastavení]'
+    '--replay-user-messages[Znovu odoslať používateľské správy zo stdin na stdout pre potvrdenie]'
+    '--allowed-tools[Zoznam povolených názvov nástrojov oddelených čiarkou alebo medzerou (napr. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Zoznam povolených názvov nástrojov oddelených čiarkou alebo medzerou (formát camelCase)]:tools:'
+    '--tools[Určiť zoznam dostupných nástrojov z vstavanej sady. Len v režime print]:tools:'
+    '--disallowed-tools[Zoznam zakázaných názvov nástrojov oddelených čiarkou alebo medzerou (napr. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Zoznam zakázaných názvov nástrojov oddelených čiarkou alebo medzerou (formát camelCase)]:tools:'
+    '--mcp-config[Načítať MCP servery z JSON súboru alebo reťazca (oddelené medzerami)]:configs:'
+    '--system-prompt[Systémový prompt pre použitie v relácii]:prompt:'
+    '--append-system-prompt[Pripojiť systémový prompt k štandardnému systémovému promptu]:prompt:'
+    '--permission-mode[Režim oprávnení pre použitie v relácii]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Pokračovať v poslednej konverzácii]'
+    '(-r --resume)'{-r,--resume}'[Obnoviť konverzáciu - zadajte identifikátor relácie alebo vyberte interaktívne]:sessionId:_claude_sessions'
+    '--fork-session[Vytvoriť nový identifikátor relácie namiesto opätovného použitia pôvodného pri obnove (s --resume alebo --continue)]'
+    '--model[Model pre aktuálnu reláciu. Zadajte alias pre najnovší model (napr. '\''sonnet'\'' alebo '\''opus'\'')]:model:'
+    '--fallback-model[Povoliť automatické prepnutie na zadaný model keď je predvolený model preťažený (len --print)]:model:'
+    '--settings[Cesta k JSON súboru s nastavením alebo JSON reťazec pre načítanie dodatočných nastavení]:file-or-json:_files'
+    '--add-dir[Ďalšie adresáre pre poskytnutie prístupu nástrojom]:directories:_directories'
+    '--ide[Automaticky sa pripojiť k IDE pri spustení ak je dostupné práve jedno platné IDE]'
+    '--strict-mcp-config[Použiť len MCP servery z --mcp-config a ignorovať všetky ostatné MCP nastavenia]'
+    '--session-id[Konkrétny identifikátor relácie pre použitie v konverzácii (musí byť platné UUID)]:uuid:'
+    '--agents[JSON objekt definujúci vlastné agenty]:json:'
+    '--setting-sources[Zoznam zdrojov nastavení oddelených čiarkou pre načítanie (user, project, local)]:sources:'
+    '--plugin-dir[Adresár pre načítanie pluginov len pre túto reláciu (možno opakovať)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Vypísať číslo verzie]'
+    '(-h --help)'{-h,--help}'[Zobraziť pomoc pre príkaz]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'príkazy claude' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "bez argumentov"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Spustiť MCP server Claude Code'
+    'add:Pridať MCP server do Claude Code'
+    'remove:Odstrániť MCP server'
+    'list:Zobraziť zoznam nakonfigurovaných MCP serverov'
+    'get:Získať detaily MCP servera'
+    'add-json:Pridať MCP server (stdio alebo SSE) s JSON reťazcom'
+    'add-from-claude-desktop:Importovať MCP servery z Claude Desktop (len Mac a WSL)'
+    'reset-project-choices:Resetovať všetky schválené/odmietnuté servery s rozsahom projektu (.mcp.json) v tomto projekte'
+    'help:Zobraziť pomoc'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'príkazy mcp' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Zapnúť režim ladenia]' \
+            '--verbose[Prepísať nastavenie podrobného režimu z konfiguračného súboru]' \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Rozsah konfigurácie (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Typ transportu (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Nastaviť premennú prostredia (napr. -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Nastaviť WebSocket hlavičku]:header:' \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Rozsah konfigurácie (local, user, project) - odstrániť z existujúceho rozsahu ak nie je zadané]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Rozsah konfigurácie (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Rozsah konfigurácie (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Validovať plugin alebo manifest marketplace'
+    'marketplace:Správa marketplace Claude Code'
+    'install:Nainštalovať plugin z dostupných marketplace'
+    'i:Nainštalovať plugin z dostupných marketplace (skratka pre install)'
+    'uninstall:Odinštalovať nainštalovaný plugin'
+    'remove:Odinštalovať nainštalovaný plugin (alias pre uninstall)'
+    'enable:Povoliť zakázaný plugin'
+    'disable:Zakázať povolený plugin'
+    'help:Zobraziť pomoc'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'príkazy plugin' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Pridať marketplace z URL, cesty alebo GitHub repozitára'
+    'list:Zobraziť zoznam nakonfigurovaných marketplace'
+    'remove:Odstrániť nakonfigurovaný marketplace'
+    'rm:Odstrániť nakonfigurovaný marketplace (alias pre remove)'
+    'update:Aktualizovať marketplace zo zdroja - aktualizovať všetky ak nie je zadaný názov'
+    'help:Zobraziť pomoc'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'príkazy marketplace' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Vynútiť inštaláciu aj keď je už nainštalované]' \
+    '(-h --help)'{-h,--help}'[Zobraziť pomoc]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

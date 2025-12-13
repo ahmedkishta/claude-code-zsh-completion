@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dünaamilised automaattäite funktsioonid
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Lugemine otse konfiguratsioonifailidest, mitte 'claude mcp list' käivitamisest
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Serverinimede eraldamine JSON-ist (mcpServers sektsioon)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Varundusvariant: claude mcp list, kui konfiguratsiooni parseerimine ebaõnnestub
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp serverid' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Pluginate kataloogide kontrollimine otse
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Duplikaatide eemaldamine
+  plugins=(${(u)plugins})
+
+  _describe 'installitud pluginad' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Sessioonide kataloogi kontrollimine
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # UUID eraldamine otse failinimedest
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Ainult kehtivate UUID filtreerimine
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'sessiooni identifikaatorid' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Konfigureeri ja halda MCP servereid'
+    'plugin:Halda Claude Code pluginaid'
+    'migrate-installer:Migreeri globaalselt npm installist lokaalsele installile'
+    'setup-token:Seadista pikaajaline autentimismärk (nõuab Claude tellingut)'
+    'doctor:Kontrolli Claude Code automaatse uuendamise süsteemi tervist'
+    'update:Kontrolli ja installi uuendused'
+    'install:Installi Claude Code natiivne versioon'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Lülita sisse silumisrežiim valikulise kategooriate filtreerimisega (nt "api,hooks" või "!statsig,!file")]:filter:'
+    '--verbose[Kirjuta üle üksikasjaliku režiimi seade konfiguratsioonifailist]'
+    '(-p --print)'{-p,--print}'[Prindi vastus ja välju (kasutamiseks pipe-ga). Märkus: kasuta ainult usaldusväärsetes kataloogides]'
+    '--output-format[Väljundi formaat (koos --print): "text" (vaikimisi), "json" (üks tulemus), või "stream-json" (voogedastus reaalajas)]:format:(text json stream-json)'
+    '--json-schema[JSON skeem struktureeritud väljundi valideerimiseks]:schema:'
+    '--include-partial-messages[Kaasa osalised sõnumifragmendid nende saabudes (koos --print ja --output-format=stream-json)]'
+    '--input-format[Sisendi formaat (koos --print): "text" (vaikimisi) või "stream-json" (voogedastatud sisend reaalajas)]:format:(text stream-json)'
+    '--mcp-debug[\[Aegunud. Kasuta selle asemel --debug\] Lülita sisse MCP silumisrežiim (näitab MCP serveri vigu)]'
+    '--dangerously-skip-permissions[Mööduge kõigist loarekontrollidest. Soovitatav ainult liivakastidele ilma internetiühenduseta]'
+    '--allow-dangerously-skip-permissions[Võimalda loarekontrollide möödumise valik ilma vaikimisi lubamiseta]'
+    '--replay-user-messages[Saada kasutaja sõnumid uuesti stdin-ist stdout-i kinnitamiseks]'
+    '--allowed-tools[Lubatud tööriistanimed komadega või tühikutega eraldatuna (nt "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Lubatud tööriistanimed komadega või tühikutega eraldatuna (camelCase formaat)]:tools:'
+    '--tools[Määra saadaolevate tööriistade loend sisseehitatud komplektist. Ainult print režiimis]:tools:'
+    '--disallowed-tools[Keelatud tööriistanimed komadega või tühikutega eraldatuna (nt "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Keelatud tööriistanimed komadega või tühikutega eraldatuna (camelCase formaat)]:tools:'
+    '--mcp-config[Laadi MCP serverid JSON failist või stringist (tühikutega eraldatud)]:configs:'
+    '--system-prompt[Süsteemipäring sessioonis kasutamiseks]:prompt:'
+    '--append-system-prompt[Lisa süsteemipäring vaikimisi süsteemipäringule]:prompt:'
+    '--permission-mode[Loarežiim sessioonis kasutamiseks]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Jätka viimasest vestlusest]'
+    '(-r --resume)'{-r,--resume}'[Jätka vestlust - määra sessiooni identifikaator või vali interaktiivselt]:sessionId:_claude_sessions'
+    '--fork-session[Loo uus sessiooni identifikaator jätkamisel originaali taaskasutamise asemel (koos --resume või --continue)]'
+    '--model[Mudel praeguseks sessiooniks. Määra hüüdnimi uusimale mudelile (nt '\''sonnet'\'' või '\''opus'\'')]:model:'
+    '--fallback-model[Võimalda automaatne üleminek määratud mudelile, kui vaikemudel on ülekoormatud (ainult --print)]:model:'
+    '--settings[Tee JSON seadete failini või JSON string lisaseadete laadimiseks]:file-or-json:_files'
+    '--add-dir[Lisaks kataloogid tööriistadele juurdepääsu võimaldamiseks]:directories:_directories'
+    '--ide[Ühenda käivitamisel automaatselt IDE-ga, kui saadaval on täpselt üks kehtiv IDE]'
+    '--strict-mcp-config[Kasuta ainult MCP servereid --mcp-config-ist ja ignoreeri kõiki teisi MCP seadeid]'
+    '--session-id[Konkreetne sessiooni identifikaator vestluses kasutamiseks (peab olema kehtiv UUID)]:uuid:'
+    '--agents[JSON objekt, mis määratleb kohandatud agendid]:json:'
+    '--setting-sources[Seadete allikate loend komadega eraldatuna laadimiseks (user, project, local)]:sources:'
+    '--plugin-dir[Kataloog pluginate laadimiseks ainult selle sessiooni jaoks (võib korda korda)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Väljasta versiooninumber]'
+    '(-h --help)'{-h,--help}'[Kuva abi käsule]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude käsud' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "argumentideta"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Käivita Claude Code MCP server'
+    'add:Lisa MCP server Claude Code-i'
+    'remove:Eemalda MCP server'
+    'list:Kuva konfigureeritud MCP serverite loend'
+    'get:Hangi MCP serveri üksikasjad'
+    'add-json:Lisa MCP server (stdio või SSE) JSON stringiga'
+    'add-from-claude-desktop:Impordi MCP serverid Claude Desktopist (ainult Mac ja WSL)'
+    'reset-project-choices:Lähtesta kõik heaks kiidetud/tagasi lükatud projekti ulatusega (.mcp.json) serverid selles projektis'
+    'help:Kuva abi'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Kuva abi]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp käsud' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Lülita sisse silumisrežiim]' \
+            '--verbose[Kirjuta üle üksikasjaliku režiimi seade konfiguratsioonifailist]' \
+            '(-h --help)'{-h,--help}'[Kuva abi]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiooni ulatus (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Transpordi tüüp (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Määra keskkonnamuutuja (nt -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Määra WebSocket päis]:header:' \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiooni ulatus (local, user, project) - eemalda olemasolevast ulatusest, kui määramata]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiooni ulatus (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiooni ulatus (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Kuva abi]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Valideeri plugin või turuplatsimanigest'
+    'marketplace:Halda Claude Code turuplatse'
+    'install:Installi plugin saadaolevatelt turuplatsdelt'
+    'i:Installi plugin saadaolevatelt turuplatsdelt (install lühend)'
+    'uninstall:Eemalda installitud plugin'
+    'remove:Eemalda installitud plugin (uninstall sünonüüm)'
+    'enable:Luba keelatud plugin'
+    'disable:Keela lubatud plugin'
+    'help:Kuva abi'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Kuva abi]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin käsud' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Lisa turuplats URL-ist, teest või GitHub repositooriumist'
+    'list:Kuva konfigureeritud turuplatsid'
+    'remove:Eemalda konfigureeritud turuplats'
+    'rm:Eemalda konfigureeritud turuplats (remove sünonüüm)'
+    'update:Uuenda turuplats allikast - uuenda kõiki, kui nimi on määramata'
+    'help:Kuva abi'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Kuva abi]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace käsud' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Kuva abi]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Sunniviisiline installimine isegi kui juba installitud]' \
+    '(-h --help)'{-h,--help}'[Kuva abi]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

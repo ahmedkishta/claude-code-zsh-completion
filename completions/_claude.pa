@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp servers' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'installed plugins' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'session IDs' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:MCP ਸਰਵਰਾਂ ਨੂੰ ਸੰਰਚਿਤ ਅਤੇ ਪ੍ਰਬੰਧਿਤ ਕਰੋ'
+    'plugin:Claude Code ਪਲੱਗਇਨਾਂ ਦਾ ਪ੍ਰਬੰਧਨ ਕਰੋ'
+    'migrate-installer:ਗਲੋਬਲ npm ਇੰਸਟਾਲ ਤੋਂ ਲੋਕਲ ਇੰਸਟਾਲ ਵਿੱਚ ਮਾਈਗ੍ਰੇਟ ਕਰੋ'
+    'setup-token:ਲੰਬੇ ਸਮੇਂ ਲਈ ਪ੍ਰਮਾਣਿਕਤਾ ਟੋਕਨ ਸੈੱਟ ਕਰੋ (Claude ਸਬਸਕ੍ਰਿਪਸ਼ਨ ਲੋੜੀਂਦੀ ਹੈ)'
+    'doctor:Claude Code ਆਟੋ-ਅੱਪਡੇਟਰ ਲਈ ਸਿਹਤ ਜਾਂਚ'
+    'update:ਅੱਪਡੇਟਾਂ ਦੀ ਜਾਂਚ ਕਰੋ ਅਤੇ ਇੰਸਟਾਲ ਕਰੋ'
+    'install:Claude Code ਨੇਟਿਵ ਬਿਲਡ ਇੰਸਟਾਲ ਕਰੋ'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[ਵਿਕਲਪਿਕ ਸ਼੍ਰੇਣੀ ਫਿਲਟਰਿੰਗ ਨਾਲ ਡੀਬੱਗ ਮੋਡ ਸਮਰੱਥ ਕਰੋ (ਜਿਵੇਂ, "api,hooks" ਜਾਂ "!statsig,!file")]:filter:'
+    '--verbose[ਕੌਂਫਿਗ ਫਾਈਲ ਤੋਂ ਵਰਬੋਜ਼ ਮੋਡ ਸੈਟਿੰਗ ਨੂੰ ਓਵਰਰਾਈਡ ਕਰੋ]'
+    '(-p --print)'{-p,--print}'[ਜਵਾਬ ਪ੍ਰਿੰਟ ਕਰੋ ਅਤੇ ਬਾਹਰ ਨਿਕਲੋ (ਪਾਈਪਾਂ ਨਾਲ ਵਰਤੋਂ ਲਈ)। ਨੋਟ: ਸਿਰਫ਼ ਭਰੋਸੇਯੋਗ ਡਾਇਰੈਕਟਰੀਆਂ ਵਿੱਚ ਵਰਤੋਂ ਕਰੋ]'
+    '--output-format[ਆਉਟਪੁੱਟ ਫਾਰਮੈਟ (--print ਨਾਲ): "text" (ਡਿਫਾਲਟ), "json" (ਸਿੰਗਲ ਨਤੀਜਾ), ਜਾਂ "stream-json" (ਰੀਅਲ-ਟਾਈਮ ਸਟ੍ਰੀਮਿੰਗ)]:format:(text json stream-json)'
+    '--json-schema[ਸੰਰਚਿਤ ਆਉਟਪੁੱਟ ਪ੍ਰਮਾਣਿਕਤਾ ਲਈ JSON ਸਕੀਮਾ]:schema:'
+    '--include-partial-messages[ਅੰਸ਼ਕ ਸੰਦੇਸ਼ ਟੁਕੜਿਆਂ ਨੂੰ ਸ਼ਾਮਲ ਕਰੋ ਜਿਵੇਂ ਉਹ ਆਉਂਦੇ ਹਨ (--print ਅਤੇ --output-format=stream-json ਨਾਲ)]'
+    '--input-format[ਇਨਪੁੱਟ ਫਾਰਮੈਟ (--print ਨਾਲ): "text" (ਡਿਫਾਲਟ) ਜਾਂ "stream-json" (ਰੀਅਲ-ਟਾਈਮ ਸਟ੍ਰੀਮਿੰਗ ਇਨਪੁੱਟ)]:format:(text stream-json)'
+    '--mcp-debug[\[ਪੁਰਾਣਾ। ਇਸ ਦੀ ਬਜਾਏ --debug ਵਰਤੋਂ ਕਰੋ\] MCP ਡੀਬੱਗ ਮੋਡ ਸਮਰੱਥ ਕਰੋ (MCP ਸਰਵਰ ਗਲਤੀਆਂ ਦਿਖਾਉਂਦਾ ਹੈ)]'
+    '--dangerously-skip-permissions[ਸਾਰੀਆਂ ਇਜਾਜ਼ਤ ਜਾਂਚਾਂ ਨੂੰ ਬਾਈਪਾਸ ਕਰੋ। ਇੰਟਰਨੈੱਟ ਐਕਸੈਸ ਤੋਂ ਬਿਨਾਂ ਸੈਂਡਬਾਕਸਾਂ ਲਈ ਸਿਫਾਰਿਸ਼ ਕੀਤੀ ਜਾਂਦੀ ਹੈ]'
+    '--allow-dangerously-skip-permissions[ਡਿਫਾਲਟ ਰੂਪ ਵਿੱਚ ਸਮਰੱਥ ਕੀਤੇ ਬਿਨਾਂ ਇਜਾਜ਼ਤ ਜਾਂਚਾਂ ਨੂੰ ਬਾਈਪਾਸ ਕਰਨ ਦੇ ਵਿਕਲਪ ਨੂੰ ਸਮਰੱਥ ਕਰੋ]'
+    '--replay-user-messages[ਪੁਸ਼ਟੀ ਲਈ stdin ਤੋਂ stdout ਤੇ ਉਪਭੋਗਤਾ ਸੰਦੇਸ਼ਾਂ ਨੂੰ ਦੁਬਾਰਾ ਭੇਜੋ]'
+    '--allowed-tools[ਇਜਾਜ਼ਤ ਦਿੱਤੇ ਟੂਲ ਨਾਵਾਂ ਦੀ ਕੰਮਾ ਜਾਂ ਸਪੇਸ-ਵਿਭਾਜਿਤ ਸੂਚੀ (ਜਿਵੇਂ, "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[ਇਜਾਜ਼ਤ ਦਿੱਤੇ ਟੂਲ ਨਾਵਾਂ ਦੀ ਕੰਮਾ ਜਾਂ ਸਪੇਸ-ਵਿਭਾਜਿਤ ਸੂਚੀ (camelCase ਫਾਰਮੈਟ)]:tools:'
+    '--tools[ਬਿਲਟ-ਇਨ ਸੈੱਟ ਤੋਂ ਉਪਲਬਧ ਟੂਲਸ ਦੀ ਸੂਚੀ ਦਰਸਾਓ। ਸਿਰਫ਼ ਪ੍ਰਿੰਟ ਮੋਡ]:tools:'
+    '--disallowed-tools[ਅਇਜਾਜ਼ਤ ਟੂਲ ਨਾਵਾਂ ਦੀ ਕੰਮਾ ਜਾਂ ਸਪੇਸ-ਵਿਭਾਜਿਤ ਸੂਚੀ (ਜਿਵੇਂ, "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[ਅਇਜਾਜ਼ਤ ਟੂਲ ਨਾਵਾਂ ਦੀ ਕੰਮਾ ਜਾਂ ਸਪੇਸ-ਵਿਭਾਜਿਤ ਸੂਚੀ (camelCase ਫਾਰਮੈਟ)]:tools:'
+    '--mcp-config[JSON ਫਾਈਲ ਜਾਂ ਸਤਰ ਤੋਂ MCP ਸਰਵਰ ਲੋਡ ਕਰੋ (ਸਪੇਸ-ਵਿਭਾਜਿਤ)]:configs:'
+    '--system-prompt[ਸੈਸ਼ਨ ਲਈ ਵਰਤਣ ਲਈ ਸਿਸਟਮ ਪ੍ਰੌਂਪਟ]:prompt:'
+    '--append-system-prompt[ਡਿਫਾਲਟ ਸਿਸਟਮ ਪ੍ਰੌਂਪਟ ਵਿੱਚ ਸਿਸਟਮ ਪ੍ਰੌਂਪਟ ਜੋੜੋ]:prompt:'
+    '--permission-mode[ਸੈਸ਼ਨ ਲਈ ਵਰਤਣ ਲਈ ਇਜਾਜ਼ਤ ਮੋਡ]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[ਸਭ ਤੋਂ ਤਾਜ਼ਾ ਗੱਲਬਾਤ ਜਾਰੀ ਰੱਖੋ]'
+    '(-r --resume)'{-r,--resume}'[ਇੱਕ ਗੱਲਬਾਤ ਮੁੜ ਸ਼ੁਰੂ ਕਰੋ - ਸੈਸ਼ਨ ID ਦਰਸਾਓ ਜਾਂ ਇੰਟਰਐਕਟਿਵ ਤੌਰ ਤੇ ਚੁਣੋ]:sessionId:_claude_sessions'
+    '--fork-session[ਮੁੜ ਸ਼ੁਰੂ ਕਰਨ ਸਮੇਂ ਮੂਲ ਸੈਸ਼ਨ ID ਦੀ ਮੁੜ ਵਰਤੋਂ ਕਰਨ ਦੀ ਬਜਾਏ ਨਵਾਂ ਸੈਸ਼ਨ ID ਬਣਾਓ (--resume ਜਾਂ --continue ਨਾਲ)]'
+    '--model[ਮੌਜੂਦਾ ਸੈਸ਼ਨ ਲਈ ਮਾਡਲ। ਨਵੀਨਤਮ ਮਾਡਲ ਲਈ ਉਪਨਾਮ ਦਰਸਾਓ (ਜਿਵੇਂ, '\''sonnet'\'' ਜਾਂ '\''opus'\'')]:model:'
+    '--fallback-model[ਜਦੋਂ ਡਿਫਾਲਟ ਮਾਡਲ ਓਵਰਲੋਡ ਹੋਵੇ ਤਾਂ ਦਰਸਾਏ ਮਾਡਲ ਵਿੱਚ ਸਵੈਚਲਿਤ ਫਾਲਬੈਕ ਸਮਰੱਥ ਕਰੋ (ਸਿਰਫ਼ --print)]:model:'
+    '--settings[ਸੈਟਿੰਗਜ਼ JSON ਫਾਈਲ ਜਾਂ ਵਾਧੂ ਸੈਟਿੰਗਜ਼ ਲੋਡ ਕਰਨ ਲਈ JSON ਸਤਰ ਦਾ ਮਾਰਗ]:file-or-json:_files'
+    '--add-dir[ਟੂਲ ਐਕਸੈਸ ਦੀ ਇਜਾਜ਼ਤ ਦੇਣ ਲਈ ਵਾਧੂ ਡਾਇਰੈਕਟਰੀਆਂ]:directories:_directories'
+    '--ide[ਜੇਕਰ ਬਿਲਕੁਲ ਇੱਕ ਵੈਧ IDE ਉਪਲਬਧ ਹੈ ਤਾਂ ਸਟਾਰਟਅੱਪ ਤੇ IDE ਨਾਲ ਆਟੋ-ਕਨੈਕਟ ਕਰੋ]'
+    '--strict-mcp-config[ਸਿਰਫ਼ --mcp-config ਤੋਂ MCP ਸਰਵਰ ਵਰਤੋਂ ਕਰੋ ਅਤੇ ਹੋਰ ਸਾਰੀਆਂ MCP ਸੈਟਿੰਗਜ਼ ਨੂੰ ਅਣਡਿੱਠ ਕਰੋ]'
+    '--session-id[ਗੱਲਬਾਤ ਲਈ ਵਰਤਣ ਲਈ ਖਾਸ ਸੈਸ਼ਨ ID (ਵੈਧ UUID ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ)]:uuid:'
+    '--agents[ਕਸਟਮ ਏਜੰਟਾਂ ਨੂੰ ਪਰਿਭਾਸ਼ਿਤ ਕਰਨ ਵਾਲਾ JSON ਆਬਜੈਕਟ]:json:'
+    '--setting-sources[ਲੋਡ ਕਰਨ ਲਈ ਸੈਟਿੰਗ ਸਰੋਤਾਂ ਦੀ ਕੰਮਾ-ਵਿਭਾਜਿਤ ਸੂਚੀ (user, project, local)]:sources:'
+    '--plugin-dir[ਸਿਰਫ਼ ਇਸ ਸੈਸ਼ਨ ਲਈ ਪਲੱਗਇਨਾਂ ਲੋਡ ਕਰਨ ਲਈ ਡਾਇਰੈਕਟਰੀ (ਦੁਹਰਾਉਣਯੋਗ)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[ਸੰਸਕਰਣ ਨੰਬਰ ਆਉਟਪੁੱਟ ਕਰੋ]'
+    '(-h --help)'{-h,--help}'[ਕਮਾਂਡ ਲਈ ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude commands' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "no arguments"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:ਇੱਕ Claude Code MCP ਸਰਵਰ ਸ਼ੁਰੂ ਕਰੋ'
+    'add:Claude Code ਵਿੱਚ ਇੱਕ MCP ਸਰਵਰ ਜੋੜੋ'
+    'remove:ਇੱਕ MCP ਸਰਵਰ ਹਟਾਓ'
+    'list:ਸੰਰਚਿਤ MCP ਸਰਵਰਾਂ ਦੀ ਸੂਚੀ ਬਣਾਓ'
+    'get:MCP ਸਰਵਰ ਵੇਰਵੇ ਪ੍ਰਾਪਤ ਕਰੋ'
+    'add-json:JSON ਸਤਰ ਨਾਲ ਇੱਕ MCP ਸਰਵਰ (stdio ਜਾਂ SSE) ਜੋੜੋ'
+    'add-from-claude-desktop:Claude Desktop ਤੋਂ MCP ਸਰਵਰ ਆਯਾਤ ਕਰੋ (ਸਿਰਫ਼ Mac ਅਤੇ WSL)'
+    'reset-project-choices:ਇਸ ਪ੍ਰੋਜੈਕਟ ਵਿੱਚ ਸਾਰੇ ਮਨਜ਼ੂਰ/ਅਸਵੀਕਾਰ ਪ੍ਰੋਜੈਕਟ-ਸਕੋਪਡ (.mcp.json) ਸਰਵਰਾਂ ਨੂੰ ਰੀਸੈੱਟ ਕਰੋ'
+    'help:ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp commands' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[ਡੀਬੱਗ ਮੋਡ ਸਮਰੱਥ ਕਰੋ]' \
+            '--verbose[ਕੌਂਫਿਗ ਫਾਈਲ ਤੋਂ ਵਰਬੋਜ਼ ਮੋਡ ਸੈਟਿੰਗ ਨੂੰ ਓਵਰਰਾਈਡ ਕਰੋ]' \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[ਕੌਂਫਿਗ ਸਕੋਪ (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[ਟ੍ਰਾਂਸਪੋਰਟ ਕਿਸਮ (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[ਵਾਤਾਵਰਣ ਚਰ ਸੈੱਟ ਕਰੋ (ਜਿਵੇਂ, -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[WebSocket ਹੈਡਰ ਸੈੱਟ ਕਰੋ]:header:' \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[ਕੌਂਫਿਗ ਸਕੋਪ (local, user, project) - ਜੇਕਰ ਅਨਿਰਦੇਸ਼ਿਤ ਹੋਵੇ ਤਾਂ ਮੌਜੂਦਾ ਸਕੋਪ ਤੋਂ ਹਟਾਓ]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[ਕੌਂਫਿਗ ਸਕੋਪ (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[ਕੌਂਫਿਗ ਸਕੋਪ (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:ਇੱਕ ਪਲੱਗਇਨ ਜਾਂ ਮਾਰਕੀਟਪਲੇਸ ਮੈਨੀਫੈਸਟ ਨੂੰ ਪ੍ਰਮਾਣਿਤ ਕਰੋ'
+    'marketplace:Claude Code ਮਾਰਕੀਟਪਲੇਸਾਂ ਦਾ ਪ੍ਰਬੰਧਨ ਕਰੋ'
+    'install:ਉਪਲਬਧ ਮਾਰਕੀਟਪਲੇਸਾਂ ਤੋਂ ਇੱਕ ਪਲੱਗਇਨ ਇੰਸਟਾਲ ਕਰੋ'
+    'i:ਉਪਲਬਧ ਮਾਰਕੀਟਪਲੇਸਾਂ ਤੋਂ ਇੱਕ ਪਲੱਗਇਨ ਇੰਸਟਾਲ ਕਰੋ (install ਲਈ ਛੋਟਾ)'
+    'uninstall:ਇੱਕ ਇੰਸਟਾਲ ਕੀਤੀ ਪਲੱਗਇਨ ਅਨਇੰਸਟਾਲ ਕਰੋ'
+    'remove:ਇੱਕ ਇੰਸਟਾਲ ਕੀਤੀ ਪਲੱਗਇਨ ਅਨਇੰਸਟਾਲ ਕਰੋ (uninstall ਲਈ ਉਪਨਾਮ)'
+    'enable:ਇੱਕ ਅਸਮਰੱਥ ਪਲੱਗਇਨ ਸਮਰੱਥ ਕਰੋ'
+    'disable:ਇੱਕ ਸਮਰੱਥ ਪਲੱਗਇਨ ਅਸਮਰੱਥ ਕਰੋ'
+    'help:ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin commands' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:URL, ਮਾਰਗ, ਜਾਂ GitHub ਰਿਪੋਜ਼ਿਟਰੀ ਤੋਂ ਇੱਕ ਮਾਰਕੀਟਪਲੇਸ ਜੋੜੋ'
+    'list:ਸੰਰਚਿਤ ਮਾਰਕੀਟਪਲੇਸਾਂ ਦੀ ਸੂਚੀ ਬਣਾਓ'
+    'remove:ਇੱਕ ਸੰਰਚਿਤ ਮਾਰਕੀਟਪਲੇਸ ਹਟਾਓ'
+    'rm:ਇੱਕ ਸੰਰਚਿਤ ਮਾਰਕੀਟਪਲੇਸ ਹਟਾਓ (remove ਲਈ ਉਪਨਾਮ)'
+    'update:ਸਰੋਤ ਤੋਂ ਮਾਰਕੀਟਪਲੇਸ ਅੱਪਡੇਟ ਕਰੋ - ਜੇਕਰ ਕੋਈ ਨਾਮ ਦਰਸਾਇਆ ਨਹੀਂ ਗਿਆ ਤਾਂ ਸਾਰੇ ਅੱਪਡੇਟ ਕਰੋ'
+    'help:ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace commands' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[ਪਹਿਲਾਂ ਤੋਂ ਇੰਸਟਾਲ ਹੋਣ ਦੀ ਸੂਰਤ ਵਿੱਚ ਵੀ ਫੋਰਸ ਇੰਸਟਾਲ ਕਰੋ]' \
+    '(-h --help)'{-h,--help}'[ਮਦਦ ਪ੍ਰਦਰਸ਼ਿਤ ਕਰੋ]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

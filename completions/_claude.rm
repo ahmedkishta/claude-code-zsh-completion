@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'servers mcp' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'plugins installads' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'IDs da sessiun' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Configurar e administrar servers MCP'
+    'plugin:Administrar plugins da Claude Code'
+    'migrate-installer:Migraziun da l'\''installaziun npm globala a quella locala'
+    'setup-token:Configurar il token d'\''autentificaziun a lunga durada (basegna in abunament Claude)'
+    'doctor:Controlla da sanadad per l'\''actualisaziun automatica da Claude Code'
+    'update:Controllar ed installar actualisaziuns'
+    'install:Installar la versiun nativa da Claude Code'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Activar il modus da debugging cun filtraziun opziunala per categoria (p.ex. "api,hooks" u "!statsig,!file")]:filter:'
+    '--verbose[Surscriver la configuraziun dal modus detaglià dal file da configuraziun]'
+    '(-p --print)'{-p,--print}'[Stampar la resposta ed enavant (per utilisar cun pipes). Remartga: duvrar mo en directories fidadas]'
+    '--output-format[Format da sortida (cun --print): "text" (standard), "json" (resultat singul), u "stream-json" (streaming en temp real)]:format:(text json stream-json)'
+    '--json-schema[Schema JSON per validaziun da sortida structurada]:schema:'
+    '--include-partial-messages[Includer fragments da messadis parzials sco ch'\''els arrivan (cun --print e --output-format=stream-json)]'
+    '--input-format[Format d'\''entrada (cun --print): "text" (standard) u "stream-json" (entrada streaming en temp real)]:format:(text stream-json)'
+    '--mcp-debug[\[Antiquà. Duvrar --debug empè\] Activar il modus da debugging MCP (mussa errurs dal server MCP)]'
+    '--dangerously-skip-permissions[Sursiglir tut las controllas da permissiuns. Recumandà mo per sandboxes senza access a l'\''internet]'
+    '--allow-dangerously-skip-permissions[Activar l'\''opziun da sursiglir controllas da permissiuns senza l'\''activar per standard]'
+    '--replay-user-messages[Trametter danovamain messadis d'\''utilisaders da stdin a stdout per confirmaziun]'
+    '--allowed-tools[Glista separada cun commas u spazis dals nums dals utensils permess (p.ex. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Glista separada cun commas u spazis dals nums dals utensils permess (format camelCase)]:tools:'
+    '--tools[Specificar ina glista dals utensils disponibels dal set integràperModus da stampar mo]:tools:'
+    '--disallowed-tools[Glista separada cun commas u spazis dals nums dals utensils betg permess (p.ex. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Glista separada cun commas u spazis dals nums dals utensils betg permess (format camelCase)]:tools:'
+    '--mcp-config[Chargiar servers MCP dad in file JSON u ina chadaina (separads cun spazis)]:configs:'
+    '--system-prompt[Prompt dal sistem per utilisar per la sessiun]:prompt:'
+    '--append-system-prompt[Agiuntar in prompt dal sistem al prompt dal sistem standard]:prompt:'
+    '--permission-mode[Modus da permissiuns per utilisar per la sessiun]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Cuntinuar la conversaziun pli nova]'
+    '(-r --resume)'{-r,--resume}'[Reprender ina conversaziun - specificar l'\''ID da sessiun u tscherner interactivamain]:sessionId:_claude_sessions'
+    '--fork-session[Crear in nov ID da sessiun empè da reutilisar l'\''ID da sessiun original cura reprender (cun --resume u --continue)]'
+    '--model[Model per la sessiun actuala. Specificar in alias per il model pli nov (p.ex. '\''sonnet'\'' u '\''opus'\'')]:model:'
+    '--fallback-model[Activar il midament automatic al model specifichà sch'\''il model standard è surchargià (mo --print)]:model:'
+    '--settings[Via ad in file JSON da configuraziun u ina chadaina JSON per chargiar configuraziuns supplementaras]:file-or-json:_files'
+    '--add-dir[Directories supplementars per permetter l'\''access als utensils]:directories:_directories'
+    '--ide[Connexiun automatica a l'\''IDE a l'\''aviaziun sche exactamain in IDE valid è disponibel]'
+    '--strict-mcp-config[Duvrar mo servers MCP da --mcp-config ed ignorar tut las autras configuraziuns MCP]'
+    '--session-id[ID da sessiun specific per utilisar per la conversaziun (sto esser in UUID valid)]:uuid:'
+    '--agents[Object JSON che definescha agentas persunalisadas]:json:'
+    '--setting-sources[Glista separada cun commas da funtaunas da configuraziun da chargiar (user, project, local)]:sources:'
+    '--plugin-dir[Directory per chargiar plugins mo per questa sessiun (repetibel)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Mussar il numer da versiun]'
+    '(-h --help)'{-h,--help}'[Mussar l'\''agid per il cumond]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'cumonds claude' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "nagins arguments"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Aviar in server MCP da Claude Code'
+    'add:Agiuntar in server MCP a Claude Code'
+    'remove:Allontanar in server MCP'
+    'list:Elencar servers MCP configurads'
+    'get:Survegnir detagls dal server MCP'
+    'add-json:Agiuntar in server MCP (stdio u SSE) cun ina chadaina JSON'
+    'add-from-claude-desktop:Importar servers MCP da Claude Desktop (mo Mac e WSL)'
+    'reset-project-choices:Reinizialisar tut ils servers cun ambit da project (.mcp.json) approvads/refusads en quest project'
+    'help:Mussar l'\''agid'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'cumonds mcp' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Activar il modus da debugging]' \
+            '--verbose[Surscriver la configuraziun dal modus detaglià dal file da configuraziun]' \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ambit da configuraziun (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Tip da transport (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Definir ina variabla d'\''ambient (p.ex. -e CLAV=valur)]:env:' \
+            '(-H --header)'{-H,--header}'[Definir in header WebSocket]:header:' \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ambit da configuraziun (local, user, project) - allontanar da l'\''ambit existent sch'\''i n'\''è betg specifichà]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ambit da configuraziun (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ambit da configuraziun (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Validar in plugin u in manifest da martgà'
+    'marketplace:Administrar martgads da Claude Code'
+    'install:Installar in plugin dals martgads disponibels'
+    'i:Installar in plugin dals martgads disponibels (furma curta dad install)'
+    'uninstall:Desinstallar in plugin installà'
+    'remove:Desinstallar in plugin installà (alias per uninstall)'
+    'enable:Activar in plugin deactivà'
+    'disable:Deactivar in plugin activà'
+    'help:Mussar l'\''agid'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'cumonds da plugin' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Agiuntar in martgà dad ina URL, via u repository GitHub'
+    'list:Elencar martgads configurads'
+    'remove:Allontanar in martgà configurà'
+    'rm:Allontanar in martgà configurà (alias per remove)'
+    'update:Actualisar il martgà da la funtauna - actualisar tuts sch'\''i n'\''è specifichà nagin num'
+    'help:Mussar l'\''agid'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'cumonds da martgà' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Sfurzar l'\''installaziun er sch'\''i è gia installà]' \
+    '(-h --help)'{-h,--help}'[Mussar l'\''agid]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

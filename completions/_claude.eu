@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp zerbitzariak' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'instalatutako pluginak' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'saio IDak' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:MCP zerbitzariak konfiguratu eta kudeatu'
+    'plugin:Claude Code pluginak kudeatu'
+    'migrate-installer:npm instalazio globaletik instalazio lokalera migratu'
+    'setup-token:Epe luzerako autentifikazio tokena konfiguratu (Claude harpidetza behar du)'
+    'doctor:Claude Code eguneratzaile automatikoaren osasun egiaztapena'
+    'update:Eguneraketak egiaztatu eta instalatu'
+    'install:Claude Code jatorrizko eraikina instalatu'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Arazketaren modua aktibatu kategoria iragazki aukerakoarekin (adib: "api,hooks" edo "!statsig,!file")]:filter:'
+    '--verbose[Konfigurazio fitxategiko xehetasun moduaren ezarpena gainidatzi]'
+    '(-p --print)'{-p,--print}'[Erantzuna inprimatu eta irten (hodietan erabiltzeko). Oharra: fidagarriak diren direktorioak soilik erabili]'
+    '--output-format[Irteera formatua (--print-ekin): "text" (lehenetsia), "json" (emaitza bakarra), edo "stream-json" (denbora errealeko streaming-a)]:format:(text json stream-json)'
+    '--json-schema[JSON eskema irteera egituratuaren balioztapenerako]:schema:'
+    '--include-partial-messages[Mezu zatikako zatiak gehitu iristen diren heinean (--print eta --output-format=stream-json-ekin)]'
+    '--input-format[Sarrera formatua (--print-ekin): "text" (lehenetsia) edo "stream-json" (denbora errealeko streaming sarrera)]:format:(text stream-json)'
+    '--mcp-debug[\[Zaharkitua. --debug erabili honen ordez\] MCP arazketaren modua aktibatu (MCP zerbitzariaren erroreak erakusten ditu)]'
+    '--dangerously-skip-permissions[Baimen egiaztapen guztiak saltatu. Interneterako sarbiderik ez duten sandbox-etarako soilik gomendatua]'
+    '--allow-dangerously-skip-permissions[Baimen egiaztapenak saltatzeko aukera gaitu lehenetsi gabe]'
+    '--replay-user-messages[Erabiltzailearen mezuak stdin-etik stdout-era berriz bidali baieztapenerako]'
+    '--allowed-tools[Komaz edo zuriunez bereizitako baimendutako tresna izenen zerrenda (adib: "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Komaz edo zuriunez bereizitako baimendutako tresna izenen zerrenda (camelCase formatua)]:tools:'
+    '--tools[Eraikitako multzo-tik erabilgarri dauden tresnen zerrenda zehaztu. Inprimatze modua soilik]:tools:'
+    '--disallowed-tools[Komaz edo zuriunez bereizitako debekatutako tresna izenen zerrenda (adib: "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Komaz edo zuriunez bereizitako debekatutako tresna izenen zerrenda (camelCase formatua)]:tools:'
+    '--mcp-config[MCP zerbitzariak JSON fitxategitik edo katetik kargatu (zuriunez bereizita)]:configs:'
+    '--system-prompt[Saioan erabili beharreko sistemaren gonbita]:prompt:'
+    '--append-system-prompt[Sistemaren gonbita lehenetsiari sistemaren gonbita gehitu]:prompt:'
+    '--permission-mode[Saioan erabili beharreko baimen modua]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Azken elkarrizketa jarraitu]'
+    '(-r --resume)'{-r,--resume}'[Elkarrizketa berrekin - saio IDa zehaztu edo interaktiboki hautatu]:sessionId:_claude_sessions'
+    '--fork-session[Saio ID berria sortu jatorrizko saio IDa berrerabili beharrean berriro hasieratzerakoan (--resume edo --continue-ekin)]'
+    '--model[Uneko saiorako modeloa. Azken modeloaren aliasa zehaztu (adib: '\''sonnet'\'' edo '\''opus'\'')]:model:'
+    '--fallback-model[Modelo lehenetsia gainkargatuta dagoenean zehaztutako modelora aldaketa automatikoa gaitu (--print soilik)]:model:'
+    '--settings[Konfigurazio JSON fitxategirako bidea edo JSON katea konfigurazio gehigarria kargatzeko]:file-or-json:_files'
+    '--add-dir[Tresnetarako sarbidea baimendu beharreko direktorio gehigarriak]:directories:_directories'
+    '--ide[Hasieran IDEra automatikoki konektatu IDE baliozkoa bat soilik erabilgarri badago]'
+    '--strict-mcp-config[--mcp-config-ko MCP zerbitzariak soilik erabili eta beste MCP ezarpen guztiak ezikusi]'
+    '--session-id[Elkarrizketarako erabili beharreko saio ID zehatza (UUID baliozkoa izan behar du)]:uuid:'
+    '--agents[Agente pertsonalizatuak definitzen dituen JSON objektua]:json:'
+    '--setting-sources[Kargatu beharreko konfigurazio iturrien komaz bereizitako zerrenda (user, project, local)]:sources:'
+    '--plugin-dir[Saio honetarako soilik pluginak kargatzeko direktorioa (errepikagarria)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Bertsio zenbakia erakutsi]'
+    '(-h --help)'{-h,--help}'[Komandoaren laguntza erakutsi]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude komandoak' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "argumenturik ez"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Claude Code MCP zerbitzaria abiarazi'
+    'add:MCP zerbitzaria Claude Code-ri gehitu'
+    'remove:MCP zerbitzaria kendu'
+    'list:Konfiguratutako MCP zerbitzariak zerrendatu'
+    'get:MCP zerbitzariaren xehetasunak lortu'
+    'add-json:MCP zerbitzaria (stdio edo SSE) JSON katearekin gehitu'
+    'add-from-claude-desktop:MCP zerbitzariak Claude Desktop-etik inportatu (Mac eta WSL soilik)'
+    'reset-project-choices:Proiektu honetako proiektu esparru (.mcp.json) onartutako/ukatutako zerbitzari guztiak berrezarri'
+    'help:Laguntza erakutsi'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp komandoak' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Arazketaren modua aktibatu]' \
+            '--verbose[Konfigurazio fitxategiko xehetasun moduaren ezarpena gainidatzi]' \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurazio esparrua (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Garraio mota (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Ingurune aldagaia ezarri (adib: -e GAKOA=balioa)]:env:' \
+            '(-H --header)'{-H,--header}'[WebSocket goiburua ezarri]:header:' \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurazio esparrua (local, user, project) - zehaztu ez bada dagoen esparrutik kendu]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurazio esparrua (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfigurazio esparrua (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Plugin edo merkatu manifestua balioztatu'
+    'marketplace:Claude Code merkatuak kudeatu'
+    'install:Plugina erabilgarri dauden merkatu-etatik instalatu'
+    'i:Plugina erabilgarri dauden merkatu-etatik instalatu (install-en forma laburra)'
+    'uninstall:Instalatutako plugina desinstalatu'
+    'remove:Instalatutako plugina desinstalatu (uninstall-en aliasa)'
+    'enable:Desgaitutako plugina gaitu'
+    'disable:Gaitutako plugina desgaitu'
+    'help:Laguntza erakutsi'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin komandoak' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Merkatua URL, bide edo GitHub biltegitik gehitu'
+    'list:Konfiguratutako merkatuak zerrendatu'
+    'remove:Konfiguratutako merkatua kendu'
+    'rm:Konfiguratutako merkatua kendu (remove-ren aliasa)'
+    'update:Merkatua iturburu-tik eguneratu - guztiak eguneratu izenik zehaztu ez bada'
+    'help:Laguntza erakutsi'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'merkatu komandoak' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Instalatu derrigortua jadanik instalatuta egon arren]' \
+    '(-h --help)'{-h,--help}'[Laguntza erakutsi]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

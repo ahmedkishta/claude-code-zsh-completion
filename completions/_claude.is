@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp-þjónar' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'uppsettar viðbætur' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'lotu-auðkenni' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Stilla og stjórna MCP-þjónum'
+    'plugin:Stjórna Claude Code viðbótum'
+    'migrate-installer:Flytja frá altækri npm uppsetningar í staðbundna uppsetningu'
+    'setup-token:Stilla langtíma auðkenningarmerki (krefst Claude áskriftar)'
+    'doctor:Heilsuathugun fyrir Claude Code sjálfvirka uppfæringar'
+    'update:Leita að og setja upp uppfærslur'
+    'install:Setja upp Claude Code native build'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Virkja kembihamur með valkvæðri flokkasíun (t.d. "api,hooks" eða "!statsig,!file")]:filter:'
+    '--verbose[Hunsa ítarlegan ham frá stillingarskrá]'
+    '(-p --print)'{-p,--print}'[Prenta svar og hætta (til notkunar með pípur). Athugið: nota aðeins í treystum möppum]'
+    '--output-format[Úttak snið (með --print): "text" (sjálfgefið), "json" (stakt niðurstaða) eða "stream-json" (rauntíma streyming)]:format:(text json stream-json)'
+    '--json-schema[JSON skema fyrir skipulagt úttak villuleit]:schema:'
+    '--include-partial-messages[Taka með hluta skilaboða þegar þau berast (með --print og --output-format=stream-json)]'
+    '--input-format[Inntak snið (með --print): "text" (sjálfgefið) eða "stream-json" (rauntíma streyming inntak)]:format:(text stream-json)'
+    '--mcp-debug[\[Úrelt. Notaðu --debug í staðinn\] Virkja MCP kembiham (sýnir MCP-þjóns villur)]'
+    '--dangerously-skip-permissions[Fara framhjá öllum heimildaathugunum. Mælt með aðeins fyrir sandkassa án netaðgangs]'
+    '--allow-dangerously-skip-permissions[Virkja valkost til að fara framhjá heimildaathugunum án þess að virkja sem sjálfgefið]'
+    '--replay-user-messages[Endursenda notendarskilaboð frá stdin á stdout til staðfestingar]'
+    '--allowed-tools[Komma eða bil aðskilinn listi yfir leyfileg verkfæranöfn (t.d. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Komma eða bil aðskilinn listi yfir leyfileg verkfæranöfn (camelCase snið)]:tools:'
+    '--tools[Tilgreina lista yfir tiltæk verkfæri úr innbyggðu setti. Aðeins prentham]:tools:'
+    '--disallowed-tools[Komma eða bil aðskilinn listi yfir óleyfileg verkfæranöfn (t.d. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Komma eða bil aðskilinn listi yfir óleyfileg verkfæranöfn (camelCase snið)]:tools:'
+    '--mcp-config[Hlaða MCP-þjónum úr JSON skrá eða strengi (bil aðskilinn)]:configs:'
+    '--system-prompt[Kerfis fyrirspurn til að nota fyrir lotu]:prompt:'
+    '--append-system-prompt[Bæta kerfis fyrirspurn við sjálfgefna kerfis fyrirspurn]:prompt:'
+    '--permission-mode[Heimildarhamur til að nota fyrir lotu]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Halda áfram nýjustu samtalinu]'
+    '(-r --resume)'{-r,--resume}'[Halda áfram samtali - tilgreina lotu-auðkenni eða velja gagnvirkt]:sessionId:_claude_sessions'
+    '--fork-session[Búa til nýtt lotu-auðkenni í stað þess að endurnýta upprunalegt lotu-auðkenni við áframhald (með --resume eða --continue)]'
+    '--model[Líkan fyrir núverandi lotu. Tilgreina samnefni fyrir nýjasta líkan (t.d. '\''sonnet'\'' eða '\''opus'\'')]:model:'
+    '--fallback-model[Virkja sjálfvirka varalíkan þegar sjálfgefið líkan er ofhlaðið (aðeins --print)]:model:'
+    '--settings[Slóð að stillingum JSON skrá eða JSON strengi til að hlaða viðbótar stillingum]:file-or-json:_files'
+    '--add-dir[Viðbótar möppur til að leyfa verkfæra aðgang]:directories:_directories'
+    '--ide[Tengja sjálfkrafa við IDE við ræsingu ef nákvæmlega eitt gilt IDE er tiltækt]'
+    '--strict-mcp-config[Nota aðeins MCP-þjóna frá --mcp-config og hunsa allar aðrar MCP stillingar]'
+    '--session-id[Sérstakt lotu-auðkenni til að nota fyrir samtal (verður að vera gilt UUID)]:uuid:'
+    '--agents[JSON hlutur sem skilgreinir sérsniðna umboðsmenn]:json:'
+    '--setting-sources[Kommu aðskilinn listi yfir stillingarheimildir til að hlaða (user, project, local)]:sources:'
+    '--plugin-dir[Mappa til að hlaða viðbótum frá aðeins fyrir þessa lotu (má endurtaka)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Sýna útgáfunúmer]'
+    '(-h --help)'{-h,--help}'[Sýna hjálp fyrir skipun]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude skipanir' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "engin viðfang"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Ræsa Claude Code MCP-þjón'
+    'add:Bæta við MCP-þjóni við Claude Code'
+    'remove:Fjarlægja MCP-þjón'
+    'list:Sýna stillta MCP-þjóna'
+    'get:Sækja MCP-þjóns upplýsingar'
+    'add-json:Bæta við MCP-þjóni (stdio eða SSE) með JSON streng'
+    'add-from-claude-desktop:Flytja inn MCP-þjóna frá Claude Desktop (aðeins Mac og WSL)'
+    'reset-project-choices:Endurstilla alla samþykkta/hafnaða verkefnamiðaða (.mcp.json) þjóna í þessu verkefni'
+    'help:Sýna hjálp'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp skipanir' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Virkja kembiham]' \
+            '--verbose[Hunsa ítarlegan ham frá stillingarskrá]' \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Stillinga umfang (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Flutningsgerð (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Tilgreina umhverfisbreytu (t.d. -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Tilgreina WebSocket haus]:header:' \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Stillinga umfang (local, user, project) - fjarlægja úr núverandi umfangi ef ótilgreint]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Stillinga umfang (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Stillinga umfang (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Villuleita viðbót eða markaðstorgs lýsigögn'
+    'marketplace:Stjórna Claude Code markaðstorgum'
+    'install:Setja upp viðbót úr tiltækum markaðstorgum'
+    'i:Setja upp viðbót úr tiltækum markaðstorgum (stutt fyrir install)'
+    'uninstall:Fjarlægja uppsetta viðbót'
+    'remove:Fjarlægja uppsetta viðbót (samheiti fyrir uninstall)'
+    'enable:Virkja óvirka viðbót'
+    'disable:Gera virka viðbót óvirka'
+    'help:Sýna hjálp'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin skipanir' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Bæta við markaðstorgi frá URL, slóð eða GitHub geymslu'
+    'list:Sýna stillt markaðstorg'
+    'remove:Fjarlægja stillt markaðstorg'
+    'rm:Fjarlægja stillt markaðstorg (samheiti fyrir remove)'
+    'update:Uppfæra markaðstorg frá uppruna - uppfæra allt ef ekkert nafn er tilgreint'
+    'help:Sýna hjálp'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace skipanir' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Þvinga uppsetningu þótt þegar sé uppsett]' \
+    '(-h --help)'{-h,--help}'[Sýna hjálp]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

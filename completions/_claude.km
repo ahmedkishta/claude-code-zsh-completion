@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp servers' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'installed plugins' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'session IDs' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:កំណត់រចនាសម្ព័ន្ធនិងគ្រប់គ្រងម៉ាស៊ីនមេ MCP'
+    'plugin:គ្រប់គ្រងកម្មវិធីជំនួយ Claude Code'
+    'migrate-installer:ផ្លាស់ប្តូរពីការដំឡើង npm សកលទៅការដំឡើងមូលដ្ឋាន'
+    'setup-token:កំណត់ថូខឹនផ្ទៀងផ្ទាត់រយៈពេលវែង (ត្រូវការការជាវ Claude)'
+    'doctor:ពិនិត្យសុខភាពកម្មវិធីធ្វើបច្ចុប្បន្នភាពស្វ័យប្រវត្តិ Claude Code'
+    'update:ពិនិត្យនិងដំឡើងបច្ចុប្បន្នភាព'
+    'install:ដំឡើង Claude Code សំណង់ដើម'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[បើកដំណើរការរបៀបបំបាត់កំហុស ជាមួយការត្រងប្រភេទស្រេចចិត្ត (ឧ. "api,hooks" ឬ "!statsig,!file")]:filter:'
+    '--verbose[បដិសេធការកំណត់របៀបលម្អិតពីឯកសារកំណត់រចនាសម្ព័ន្ធ]'
+    '(-p --print)'{-p,--print}'[បោះពុម្ពការឆ្លើយតបហើយចេញ (សម្រាប់ប្រើជាមួយបំពង់)។ សំគាល់៖ ប្រើតែក្នុងថតដែលទុកចិត្តប៉ុណ្ណោះ]'
+    '--output-format[ទម្រង់លទ្ធផល (ជាមួយ --print)៖ "text" (លំនាំដើម), "json" (លទ្ធផលតែមួយ) ឬ "stream-json" (ស្ទ្រីមពេលវេលាជាក់ស្តែង)]:format:(text json stream-json)'
+    '--json-schema[ស្គីម JSON សម្រាប់ការផ្ទៀងផ្ទាត់លទ្ធផលដែលមានរចនាសម្ព័ន្ធ]:schema:'
+    '--include-partial-messages[រួមបញ្ចូលផ្នែកសាររងៗ (ជាមួយ --print និង --output-format=stream-json)]'
+    '--input-format[ទម្រង់បញ្ចូល (ជាមួយ --print)៖ "text" (លំនាំដើម) ឬ "stream-json" (ស្ទ្រីមបញ្ចូលពេលវេលាជាក់ស្តែង)]:format:(text stream-json)'
+    '--mcp-debug[【ត្រូវបានបោះបង់ចោល។ សូមប្រើ --debug ជំនួសវិញ】 បើកដំណើរការរបៀបបំបាត់កំហុស MCP (បង្ហាញកំហុសម៉ាស៊ីនមេ MCP)]'
+    '--dangerously-skip-permissions[រំលងការពិនិត្យសិទ្ធិទាំងអស់។ ផ្តល់អនុសាសន៍តែសម្រាប់ sandbox ដែលគ្មានការចូលប្រើអ៊ីនធឺណិតប៉ុណ្ណោះ]'
+    '--allow-dangerously-skip-permissions[បើកជម្រើសរំលងការពិនិត្យសិទ្ធិ ប៉ុន្តែមិនបើកដំណើរការជាលំនាំដើមទេ]'
+    '--replay-user-messages[ផ្ញើសារអ្នកប្រើប្រាស់ម្តងទៀតពី stdin នៅលើ stdout សម្រាប់ការបញ្ជាក់]'
+    '--allowed-tools[បញ្ជីឈ្មោះឧបករណ៍ដែលអនុញ្ញាត (ផ្តាច់ដោយសញ្ញាក្បៀស ឬដកឃ្លា ឧ. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[បញ្ជីឈ្មោះឧបករណ៍ដែលអនុញ្ញាត (ទម្រង់ camelCase)]:tools:'
+    '--tools[បញ្ជាក់បញ្ជីឧបករណ៍ដែលមានពីសំណុំដែលបង្កប់មក។ តែរបៀបបោះពុម្ពប៉ុណ្ណោះ]:tools:'
+    '--disallowed-tools[បញ្ជីឈ្មោះឧបករណ៍ដែលមិនអនុញ្ញាត (ផ្តាច់ដោយសញ្ញាក្បៀស ឬដកឃ្លា ឧ. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[បញ្ជីឈ្មោះឧបករណ៍ដែលមិនអនុញ្ញាត (ទម្រង់ camelCase)]:tools:'
+    '--mcp-config[ផ្ទុកម៉ាស៊ីនមេ MCP ពីឯកសារ JSON ឬខ្សែអក្សរ (ផ្តាច់ដោយដកឃ្លា)]:configs:'
+    '--system-prompt[ការជំរុញប្រព័ន្ធសម្រាប់វគ្គ]:prompt:'
+    '--append-system-prompt[បន្ថែមការជំរុញប្រព័ន្ធទៅការជំរុញប្រព័ន្ធលំនាំដើម]:prompt:'
+    '--permission-mode[របៀបសិទ្ធិសម្រាប់វគ្គ]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[បន្តការសន្ទនាថ្មីបំផុត]'
+    '(-r --resume)'{-r,--resume}'[បន្តការសន្ទនា - បញ្ជាក់លេខសម្គាល់វគ្គ ឬជ្រើសរើសតាមអន្តរកម្ម]:sessionId:_claude_sessions'
+    '--fork-session[បង្កើតលេខសម្គាល់វគ្គថ្មីជំនួសឱ្យការប្រើលេខសម្គាល់វគ្គដើមឡើងវិញ នៅពេលបន្ត (ជាមួយ --resume ឬ --continue)]'
+    '--model[គំរូសម្រាប់វគ្គបច្ចុប្បន្ន។ បញ្ជាក់ឈ្មោះក្លែងក្លាយសម្រាប់គំរូថ្មីបំផុត (ឧ. '\''sonnet'\'' ឬ '\''opus'\'')]:model:'
+    '--fallback-model[បើកដំណើរការការថយក្រោយស្វ័យប្រវត្តិទៅគំរូដែលបានបញ្ជាក់ នៅពេលគំរូលំនាំដើមមានបន្ទុកលើស (តែ --print ប៉ុណ្ណោះ)]:model:'
+    '--settings[ផ្លូវឯកសារ JSON នៃការកំណត់ ឬខ្សែអក្សរ JSON ដើម្បីផ្ទុកការកំណត់បន្ថែម]:file-or-json:_files'
+    '--add-dir[ថតបន្ថែមដើម្បីអនុញ្ញាតឱ្យឧបករណ៍ចូលប្រើ]:directories:_directories'
+    '--ide[ភ្ជាប់ទៅ IDE ស្វ័យប្រវត្តិនៅពេលចាប់ផ្តើម ប្រសិនបើមាន IDE ត្រឹមត្រូវតែមួយ]'
+    '--strict-mcp-config[ប្រើតែម៉ាស៊ីនមេ MCP ពី --mcp-config និងមិនអើពើនឹងការកំណត់ MCP ផ្សេងទៀតទាំងអស់]'
+    '--session-id[លេខសម្គាល់វគ្គជាក់លាក់សម្រាប់ការសន្ទនា (ត្រូវតែជា UUID ត្រឹមត្រូវ)]:uuid:'
+    '--agents[វត្ថុ JSON កំណត់ភ្នាក់ងារផ្ទាល់ខ្លួន]:json:'
+    '--setting-sources[បញ្ជីប្រភពការកំណត់ដើម្បីផ្ទុក (ផ្តាច់ដោយសញ្ញាក្បៀស៖ user, project, local)]:sources:'
+    '--plugin-dir[ថតដើម្បីផ្ទុកកម្មវិធីជំនួយសម្រាប់វគ្គនេះតែប៉ុណ្ណោះ (អាចធ្វើម្តងទៀត)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[បញ្ចេញលេខកំណែ]'
+    '(-h --help)'{-h,--help}'[បង្ហាញជំនួយពាក្យបញ្ជា]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude commands' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "no arguments"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:ចាប់ផ្តើមម៉ាស៊ីនមេ MCP របស់ Claude Code'
+    'add:បន្ថែមម៉ាស៊ីនមេ MCP ទៅ Claude Code'
+    'remove:លុបម៉ាស៊ីនមេ MCP'
+    'list:រាយបញ្ជីម៉ាស៊ីនមេ MCP ដែលបានកំណត់រចនាសម្ព័ន្ធ'
+    'get:ទទួលបានព័ត៌មានលម្អិតម៉ាស៊ីនមេ MCP'
+    'add-json:បន្ថែមម៉ាស៊ីនមេ MCP ជាមួយខ្សែអក្សរ JSON (stdio ឬ SSE)'
+    'add-from-claude-desktop:នាំចូលម៉ាស៊ីនមេ MCP ពី Claude Desktop (តែ Mac និង WSL ប៉ុណ្ណោះ)'
+    'reset-project-choices:កំណត់ឡើងវិញនូវម៉ាស៊ីនមេដែលមានវិសាលភាពគម្រោង (.mcp.json) ដែលបានអនុម័ត/បដិសេធទាំងអស់ក្នុងគម្រោងនេះ'
+    'help:បង្ហាញជំនួយ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp commands' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[បើកដំណើរការរបៀបបំបាត់កំហុស]' \
+            '--verbose[បដិសេធការកំណត់របៀបលម្អិតពីឯកសារកំណត់រចនាសម្ព័ន្ធ]' \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[វិសាលភាពការកំណត់រចនាសម្ព័ន្ធ (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[ប្រភេទការដឹកជញ្ជូន (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[កំណត់អថេរបរិស្ថាន (ឧ. -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[កំណត់បឋមកថា WebSocket]:header:' \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[វិសាលភាពការកំណត់រចនាសម្ព័ន្ធ (local, user, project) - លុបពីវិសាលភាពដែលមានស្រាប់ ប្រសិនបើមិនបានបញ្ជាក់]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[វិសាលភាពការកំណត់រចនាសម្ព័ន្ធ (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[វិសាលភាពការកំណត់រចនាសម្ព័ន្ធ (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:ផ្ទៀងផ្ទាត់កម្មវិធីជំនួយ ឬបញ្ជីសេចក្តីលម្អិតទីផ្សារ'
+    'marketplace:គ្រប់គ្រងទីផ្សារ Claude Code'
+    'install:ដំឡើងកម្មវិធីជំនួយពីទីផ្សារដែលមាន'
+    'i:ដំឡើងកម្មវិធីជំនួយពីទីផ្សារដែលមាន (ទម្រង់ខ្លីនៃ install)'
+    'uninstall:លុបការដំឡើងកម្មវិធីជំនួយដែលបានដំឡើង'
+    'remove:លុបការដំឡើងកម្មវិធីជំនួយដែលបានដំឡើង (ឈ្មោះផ្សេងនៃ uninstall)'
+    'enable:បើកដំណើរការកម្មវិធីជំនួយដែលបានបិទ'
+    'disable:បិទកម្មវិធីជំនួយដែលបានបើក'
+    'help:បង្ហាញជំនួយ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin commands' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:បន្ថែមទីផ្សារពី URL, ផ្លូវ ឬឃ្លាំង GitHub'
+    'list:រាយបញ្ជីទីផ្សារដែលបានកំណត់រចនាសម្ព័ន្ធ'
+    'remove:លុបទីផ្សារដែលបានកំណត់រចនាសម្ព័ន្ធ'
+    'rm:លុបទីផ្សារដែលបានកំណត់រចនាសម្ព័ន្ធ (ឈ្មោះផ្សេងនៃ remove)'
+    'update:ធ្វើបច្ចុប្បន្នភាពទីផ្សារពីប្រភព - ធ្វើបច្ចុប្បន្នភាពទាំងអស់ ប្រសិនបើមិនបានបញ្ជាក់ឈ្មោះ'
+    'help:បង្ហាញជំនួយ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace commands' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[បង្ខំឱ្យដំឡើង ទោះបីជាបានដំឡើងរួចហើយក៏ដោយ]' \
+    '(-h --help)'{-h,--help}'[បង្ហាញជំនួយ]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

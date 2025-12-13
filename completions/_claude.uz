@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp servers' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'installed plugins' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'session IDs' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:MCP serverlarini sozlash va boshqarish'
+    'plugin:Claude Code plaginlarini boshqarish'
+    'migrate-installer:Global npm o'\''rnatishdan mahalliy o'\''rnatishga o'\''tish'
+    'setup-token:Uzoq muddatli autentifikatsiya tokenini sozlash (Claude obunasi kerak)'
+    'doctor:Claude Code avtomatik yangilash uchun sog'\''liqni tekshirish'
+    'update:Yangilanishlarni tekshirish va o'\''rnatish'
+    'install:Claude Code mahalliy build-ini o'\''rnatish'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Kategoriya filtrlash bilan debug rejimini yoqish (masalan, "api,hooks" yoki "!statsig,!file")]:filter:'
+    '--verbose[Konfiguratsiya faylidan batafsil rejim sozlamasini bekor qilish]'
+    '(-p --print)'{-p,--print}'[Javobni chop etish va chiqish (quvurlar bilan foydalanish uchun). Eslatma: faqat ishonchli kataloglarda foydalaning]'
+    '--output-format[Chiqish formati (--print bilan): "text" (standart), "json" (yagona natija), yoki "stream-json" (real vaqt oqimi)]:format:(text json stream-json)'
+    '--json-schema[Strukturaviy chiqishni tekshirish uchun JSON sxemasi]:schema:'
+    '--include-partial-messages[Qisman xabar bo'\''laklarini kelgan paytda qo'\''shish (--print va --output-format=stream-json bilan)]'
+    '--input-format[Kirish formati (--print bilan): "text" (standart) yoki "stream-json" (real vaqt oqimi kirishi)]:format:(text stream-json)'
+    '--mcp-debug[Eskirgan. O'\''rniga --debug ishlatilsin] MCP debug rejimini yoqish (MCP server xatolarini ko'\''rsatadi)]'
+    '--dangerously-skip-permissions[Barcha ruxsat tekshiruvlarini o'\''tkazib yuborish. Faqat internetga kirish imkoni bo'\''lmagan sandbox muhitlar uchun tavsiya etiladi]'
+    '--allow-dangerously-skip-permissions[Sukut bo'\''yicha yoqmasdan ruxsat tekshiruvlarini o'\''tkazib yuborish imkoniyatini yoqish]'
+    '--replay-user-messages[Tasdiqlash uchun stdin-dan stdout-ga foydalanuvchi xabarlarini qayta yuborish]'
+    '--allowed-tools[Vergul yoki bo'\''sh joy bilan ajratilgan ruxsat etilgan vosita nomlari ro'\''yxati (masalan, "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Vergul yoki bo'\''sh joy bilan ajratilgan ruxsat etilgan vosita nomlari ro'\''yxati (camelCase formati)]:tools:'
+    '--tools[Ichki to'\''plamdan mavjud vositalar ro'\''yxatini ko'\''rsatish. Faqat print rejimi]:tools:'
+    '--disallowed-tools[Vergul yoki bo'\''sh joy bilan ajratilgan taqiqlangan vosita nomlari ro'\''yxati (masalan, "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Vergul yoki bo'\''sh joy bilan ajratilgan taqiqlangan vosita nomlari ro'\''yxati (camelCase formati)]:tools:'
+    '--mcp-config[JSON faylidan yoki qatordan MCP serverlarini yuklash (bo'\''sh joy bilan ajratilgan)]:configs:'
+    '--system-prompt[Sessiya uchun tizim prompti]:prompt:'
+    '--append-system-prompt[Standart tizim promptiga tizim promptini qo'\''shish]:prompt:'
+    '--permission-mode[Sessiya uchun ruxsat rejimi]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Eng so'\''nggi suhbatni davom ettirish]'
+    '(-r --resume)'{-r,--resume}'[Suhbatni davom ettirish - sessiya identifikatorini ko'\''rsating yoki interaktiv tanlang]:sessionId:_claude_sessions'
+    '--fork-session[Davom ettirayotganda asl sessiya identifikatorini qayta ishlatish o'\''rniga yangi sessiya identifikatorini yaratish (--resume yoki --continue bilan)]'
+    '--model[Joriy sessiya uchun model. Eng yangi model uchun taxallusni ko'\''rsating (masalan, '\''sonnet'\'' yoki '\''opus'\'')]:model:'
+    '--fallback-model[Standart model ortiqcha yuklangan bo'\''lganda ko'\''rsatilgan modelga avtomatik qaytishni yoqish (faqat --print)]:model:'
+    '--settings[Qo'\''shimcha sozlamalarni yuklash uchun sozlamalar JSON fayli yoki JSON qator yo'\''li]:file-or-json:_files'
+    '--add-dir[Vosita kirishi uchun qo'\''shimcha kataloglar]:directories:_directories'
+    '--ide[Ishga tushirishda aynan bitta yaroqli IDE mavjud bo'\''lsa, avtomatik ravishda IDE-ga ulanish]'
+    '--strict-mcp-config[Faqat --mcp-config-dan MCP serverlaridan foydalanish va barcha boshqa MCP sozlamalarini e'\''tiborsiz qoldirish]'
+    '--session-id[Suhbat uchun maxsus sessiya identifikatori (yaroqli UUID bo'\''lishi kerak)]:uuid:'
+    '--agents[Maxsus agentlarni aniqlash uchun JSON obyekti]:json:'
+    '--setting-sources[Yuklash uchun vergul bilan ajratilgan sozlamalar manbalari ro'\''yxati (user, project, local)]:sources:'
+    '--plugin-dir[Faqat ushbu sessiya uchun plaginlarni yuklash uchun katalog (takrorlanishi mumkin)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Versiya raqamini chiqarish]'
+    '(-h --help)'{-h,--help}'[Buyruq uchun yordamni ko'\''rsatish]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude commands' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "no arguments"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Claude Code MCP serverini ishga tushirish'
+    'add:Claude Code-ga MCP serverini qo'\''shish'
+    'remove:MCP serverini o'\''chirish'
+    'list:Sozlangan MCP serverlari ro'\''yxati'
+    'get:MCP server tafsilotlarini olish'
+    'add-json:JSON qatori bilan MCP serverini qo'\''shish (stdio yoki SSE)'
+    'add-from-claude-desktop:Claude Desktop-dan MCP serverlarini import qilish (faqat Mac va WSL)'
+    'reset-project-choices:Ushbu loyihadagi barcha tasdiqlangan/rad etilgan loyiha doirasidagi (.mcp.json) serverlarni qayta tiklash'
+    'help:Yordamni ko'\''rsatish'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp commands' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Debug rejimini yoqish]' \
+            '--verbose[Konfiguratsiya faylidan batafsil rejim sozlamasini bekor qilish]' \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiya doirasi (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Transport turi (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Muhit o'\''zgaruvchisini sozlash (masalan, -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[WebSocket sarlavhasini sozlash]:header:' \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiya doirasi (local, user, project) - ko'\''rsatilmasa mavjud doiradan o'\''chirish]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiya doirasi (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Konfiguratsiya doirasi (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Plagin yoki bozor manifestini tekshirish'
+    'marketplace:Claude Code bozorlarini boshqarish'
+    'install:Mavjud bozorlardan plagin o'\''rnatish'
+    'i:Mavjud bozorlardan plagin o'\''rnatish (install uchun qisqa)'
+    'uninstall:O'\''rnatilgan plaginni o'\''chirish'
+    'remove:O'\''rnatilgan plaginni o'\''chirish (uninstall uchun taxallus)'
+    'enable:O'\''chirilgan plaginni yoqish'
+    'disable:Yoqilgan plaginni o'\''chirish'
+    'help:Yordamni ko'\''rsatish'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin commands' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:URL, yo'\''l yoki GitHub repositoriyasidan bozor qo'\''shish'
+    'list:Sozlangan bozorlar ro'\''yxati'
+    'remove:Sozlangan bozorni o'\''chirish'
+    'rm:Sozlangan bozorni o'\''chirish (remove uchun taxallus)'
+    'update:Manbadan bozorni yangilash - nomi ko'\''rsatilmasa hammasini yangilash'
+    'help:Yordamni ko'\''rsatish'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace commands' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Allaqachon o'\''rnatilgan bo'\''lsa ham majburan o'\''rnatish]' \
+    '(-h --help)'{-h,--help}'[Yordamni ko'\''rsatish]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'servere mcp' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'plugin-uri instalate' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'ID-uri de sesiune' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Configurare și gestionare servere MCP'
+    'plugin:Gestionare plugin-uri Claude Code'
+    'migrate-installer:Migrare de la instalare npm globală la instalare locală'
+    'setup-token:Configurare token de autentificare pe termen lung (necesită abonament Claude)'
+    'doctor:Verificare stare pentru actualizatorul automat Claude Code'
+    'update:Verificare și instalare actualizări'
+    'install:Instalare build nativ Claude Code'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Activare mod depanare cu filtrare opțională pe categorie (ex: "api,hooks" sau "!statsig,!file")]:filter:'
+    '--verbose[Suprascrie setarea modului detaliat din fișierul de configurare]'
+    '(-p --print)'{-p,--print}'[Afișare răspuns și ieșire (pentru utilizare cu pipe-uri). Notă: utilizați doar în directoare de încredere]'
+    '--output-format[Format ieșire (cu --print): "text" (implicit), "json" (rezultat unic), sau "stream-json" (streaming în timp real)]:format:(text json stream-json)'
+    '--json-schema[Schemă JSON pentru validare ieșire structurată]:schema:'
+    '--include-partial-messages[Include fragmente de mesaje parțiale pe măsură ce sosesc (cu --print și --output-format=stream-json)]'
+    '--input-format[Format intrare (cu --print): "text" (implicit) sau "stream-json" (intrare streaming în timp real)]:format:(text stream-json)'
+    '--mcp-debug[\[Depreciat. Folosiți --debug în schimb\] Activare mod depanare MCP (afișează erori server MCP)]'
+    '--dangerously-skip-permissions[Ocolire toate verificările de permisiuni. Recomandat doar pentru sandbox-uri fără acces la internet]'
+    '--allow-dangerously-skip-permissions[Activare opțiune de ocolire a verificărilor de permisiuni fără activare implicită]'
+    '--replay-user-messages[Retrimiteri mesaje utilizator de la stdin pe stdout pentru confirmare]'
+    '--allowed-tools[Listă separată prin virgule sau spații de nume de unelte permise (ex: "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Listă separată prin virgule sau spații de nume de unelte permise (format camelCase)]:tools:'
+    '--tools[Specificare listă de unelte disponibile din setul integrat. Doar mod afișare]:tools:'
+    '--disallowed-tools[Listă separată prin virgule sau spații de nume de unelte interzise (ex: "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Listă separată prin virgule sau spații de nume de unelte interzise (format camelCase)]:tools:'
+    '--mcp-config[Încărcare servere MCP din fișier JSON sau șir (separate prin spații)]:configs:'
+    '--system-prompt[Prompt sistem de utilizat pentru sesiune]:prompt:'
+    '--append-system-prompt[Adăugare prompt sistem la promptul sistem implicit]:prompt:'
+    '--permission-mode[Mod permisiuni de utilizat pentru sesiune]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Continuare conversația cea mai recentă]'
+    '(-r --resume)'{-r,--resume}'[Reluare conversație - specificați ID sesiune sau selectați interactiv]:sessionId:_claude_sessions'
+    '--fork-session[Creare ID sesiune nou în loc de reutilizare ID sesiune original la reluare (cu --resume sau --continue)]'
+    '--model[Model pentru sesiunea curentă. Specificați alias pentru modelul cel mai recent (ex: '\''sonnet'\'' sau '\''opus'\'')]:model:'
+    '--fallback-model[Activare fallback automat la modelul specificat când modelul implicit este supraîncărcat (doar --print)]:model:'
+    '--settings[Cale către fișier JSON de setări sau șir JSON pentru încărcare setări adiționale]:file-or-json:_files'
+    '--add-dir[Directoare adiționale pentru permiteți accesul uneltelor]:directories:_directories'
+    '--ide[Conectare automată la IDE la pornire dacă exact un IDE valid este disponibil]'
+    '--strict-mcp-config[Utilizare doar servere MCP din --mcp-config și ignorare toate celelalte setări MCP]'
+    '--session-id[ID sesiune specific de utilizat pentru conversație (trebuie să fie UUID valid)]:uuid:'
+    '--agents[Obiect JSON definind agenți personalizați]:json:'
+    '--setting-sources[Listă separată prin virgule de surse de setări de încărcat (user, project, local)]:sources:'
+    '--plugin-dir[Director pentru încărcare plugin-uri doar pentru această sesiune (repetabil)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Afișare număr versiune]'
+    '(-h --help)'{-h,--help}'[Afișare ajutor pentru comandă]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comenzi claude' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "fără argumente"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Pornire server MCP Claude Code'
+    'add:Adăugare server MCP la Claude Code'
+    'remove:Eliminare server MCP'
+    'list:Listare servere MCP configurate'
+    'get:Obținere detalii server MCP'
+    'add-json:Adăugare server MCP (stdio sau SSE) cu șir JSON'
+    'add-from-claude-desktop:Importare servere MCP din Claude Desktop (doar Mac și WSL)'
+    'reset-project-choices:Resetare toate serverele cu domeniu de proiect (.mcp.json) aprobate/respinse în acest proiect'
+    'help:Afișare ajutor'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comenzi mcp' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Activare mod depanare]' \
+            '--verbose[Suprascrie setarea modului detaliat din fișierul de configurare]' \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Domeniu configurare (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Tip transport (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Setare variabilă de mediu (ex: -e CHEIE=valoare)]:env:' \
+            '(-H --header)'{-H,--header}'[Setare antet WebSocket]:header:' \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Domeniu configurare (local, user, project) - eliminare din domeniu existent dacă nespecificat]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Domeniu configurare (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Domeniu configurare (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Validare plugin sau manifest marketplace'
+    'marketplace:Gestionare marketplace-uri Claude Code'
+    'install:Instalare plugin din marketplace-urile disponibile'
+    'i:Instalare plugin din marketplace-urile disponibile (formă scurtă pentru install)'
+    'uninstall:Dezinstalare plugin instalat'
+    'remove:Dezinstalare plugin instalat (alias pentru uninstall)'
+    'enable:Activare plugin dezactivat'
+    'disable:Dezactivare plugin activat'
+    'help:Afișare ajutor'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comenzi plugin' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Adăugare marketplace din URL, cale sau depozit GitHub'
+    'list:Listare marketplace-uri configurate'
+    'remove:Eliminare marketplace configurat'
+    'rm:Eliminare marketplace configurat (alias pentru remove)'
+    'update:Actualizare marketplace din sursă - actualizare toate dacă niciun nume specificat'
+    'help:Afișare ajutor'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comenzi marketplace' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Forțare instalare chiar dacă este deja instalat]' \
+    '(-h --help)'{-h,--help}'[Afișare ajutor]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

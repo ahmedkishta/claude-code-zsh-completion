@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'servidores mcp' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'complementos instalados' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'IDs de sesión' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Configurar e xestionar servidores MCP'
+    'plugin:Xestionar complementos de Claude Code'
+    'migrate-installer:Migrar da instalación npm global á instalación local'
+    'setup-token:Configurar token de autenticación a longo prazo (require subscrición Claude)'
+    'doctor:Comprobación de estado para o actualizador automático de Claude Code'
+    'update:Comprobar e instalar actualizacións'
+    'install:Instalar compilación nativa de Claude Code'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Activar modo de depuración con filtraxe opcional por categoría (ex: "api,hooks" ou "!statsig,!file")]:filter:'
+    '--verbose[Substituír configuración de modo detallado do ficheiro de configuración]'
+    '(-p --print)'{-p,--print}'[Imprimir resposta e saír (para uso con canles). Nota: usar só en directorios de confianza]'
+    '--output-format[Formato de saída (con --print): "text" (predeterminado), "json" (resultado único), ou "stream-json" (transmisión en tempo real)]:format:(text json stream-json)'
+    '--json-schema[Esquema JSON para validación de saída estruturada]:schema:'
+    '--include-partial-messages[Incluír fragmentos de mensaxes parciais a medida que chegan (con --print e --output-format=stream-json)]'
+    '--input-format[Formato de entrada (con --print): "text" (predeterminado) ou "stream-json" (entrada de transmisión en tempo real)]:format:(text stream-json)'
+    '--mcp-debug[\[Obsoleto. Usar --debug no seu lugar\] Activar modo de depuración MCP (mostra erros do servidor MCP)]'
+    '--dangerously-skip-permissions[Omitir todas as comprobacións de permisos. Recomendado só para sandboxes sen acceso a Internet]'
+    '--allow-dangerously-skip-permissions[Activar opción para omitir comprobacións de permisos sen activala por defecto]'
+    '--replay-user-messages[Reenviar mensaxes de usuario desde stdin a stdout para confirmación]'
+    '--allowed-tools[Lista separada por comas ou espazos de nomes de ferramentas permitidas (ex: "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Lista separada por comas ou espazos de nomes de ferramentas permitidas (formato camelCase)]:tools:'
+    '--tools[Especificar lista de ferramentas dispoñibles do conxunto integrado. Só modo impresión]:tools:'
+    '--disallowed-tools[Lista separada por comas ou espazos de nomes de ferramentas non permitidas (ex: "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Lista separada por comas ou espazos de nomes de ferramentas non permitidas (formato camelCase)]:tools:'
+    '--mcp-config[Cargar servidores MCP desde ficheiro JSON ou cadea (separados por espazos)]:configs:'
+    '--system-prompt[Indicación do sistema a usar para a sesión]:prompt:'
+    '--append-system-prompt[Engadir indicación do sistema á indicación do sistema predeterminada]:prompt:'
+    '--permission-mode[Modo de permisos a usar para a sesión]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Continuar a conversa mais recente]'
+    '(-r --resume)'{-r,--resume}'[Retomar unha conversa - especificar ID de sesión ou seleccionar interactivamente]:sessionId:_claude_sessions'
+    '--fork-session[Crear novo ID de sesión no lugar de reutilizar o ID de sesión orixinal ao retomar (con --resume ou --continue)]'
+    '--model[Modelo para a sesión actual. Especificar alias para o modelo mais recente (ex: '\''sonnet'\'' ou '\''opus'\'')]:model:'
+    '--fallback-model[Activar cambio automático ao modelo especificado cando o modelo predeterminado está sobrecargado (só --print)]:model:'
+    '--settings[Ruta a ficheiro JSON de configuración ou cadea JSON para cargar configuración adicional]:file-or-json:_files'
+    '--add-dir[Directorios adicionais para permitir acceso ás ferramentas]:directories:_directories'
+    '--ide[Conexión automática ao IDE no inicio se exactamente un IDE válido está dispoñible]'
+    '--strict-mcp-config[Usar só servidores MCP de --mcp-config e ignorar toda a outra configuración MCP]'
+    '--session-id[ID de sesión específico a usar para a conversa (debe ser UUID válido)]:uuid:'
+    '--agents[Obxecto JSON que define axentes personalizados]:json:'
+    '--setting-sources[Lista separada por comas de fontes de configuración a cargar (user, project, local)]:sources:'
+    '--plugin-dir[Directorio para cargar complementos só para esta sesión (repetible)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Mostrar número de versión]'
+    '(-h --help)'{-h,--help}'[Mostrar axuda para o comando]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comandos claude' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "sen argumentos"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Iniciar un servidor MCP de Claude Code'
+    'add:Engadir un servidor MCP a Claude Code'
+    'remove:Eliminar un servidor MCP'
+    'list:Listar servidores MCP configurados'
+    'get:Obter detalles do servidor MCP'
+    'add-json:Engadir un servidor MCP (stdio ou SSE) con cadea JSON'
+    'add-from-claude-desktop:Importar servidores MCP desde Claude Desktop (só Mac e WSL)'
+    'reset-project-choices:Restablecer todos os servidores de ámbito de proxecto (.mcp.json) aprobados/rexeitados neste proxecto'
+    'help:Mostrar axuda'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comandos mcp' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Activar modo de depuración]' \
+            '--verbose[Substituír configuración de modo detallado do ficheiro de configuración]' \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ámbito de configuración (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Tipo de transporte (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Definir variable de contorno (ex: -e CHAVE=valor)]:env:' \
+            '(-H --header)'{-H,--header}'[Definir cabeceira WebSocket]:header:' \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ámbito de configuración (local, user, project) - eliminar do ámbito existente se non se especifica]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ámbito de configuración (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Ámbito de configuración (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Validar un complemento ou manifesto de mercado'
+    'marketplace:Xestionar mercados de Claude Code'
+    'install:Instalar un complemento dos mercados dispoñibles'
+    'i:Instalar un complemento dos mercados dispoñibles (forma curta de install)'
+    'uninstall:Desinstalar un complemento instalado'
+    'remove:Desinstalar un complemento instalado (alias para uninstall)'
+    'enable:Activar un complemento desactivado'
+    'disable:Desactivar un complemento activado'
+    'help:Mostrar axuda'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comandos de complemento' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Engadir un mercado desde unha URL, ruta ou repositorio GitHub'
+    'list:Listar mercados configurados'
+    'remove:Eliminar un mercado configurado'
+    'rm:Eliminar un mercado configurado (alias para remove)'
+    'update:Actualizar mercado desde a fonte - actualizar todos se non se especifica ningún nome'
+    'help:Mostrar axuda'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'comandos de mercado' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Forzar instalación aínda que xa estea instalado]' \
+    '(-h --help)'{-h,--help}'[Mostrar axuda]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

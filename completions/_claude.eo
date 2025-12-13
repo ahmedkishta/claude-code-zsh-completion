@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dynamic completion functions
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Read directly from config files instead of running 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Extract server names from JSON (mcpServers section)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Fallback to claude mcp list if config parsing fails
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp-serviloj' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Check plugin directories directly
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Remove duplicates
+  plugins=(${(u)plugins})
+
+  _describe 'instalitaj kromaĵoj' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Check session directory
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Extract UUIDs directly from filenames
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Filter only valid UUIDs
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'seanc-identigiloj' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Agordi kaj administri MCP-servilojn'
+    'plugin:Administri Claude Code kromaĵojn'
+    'migrate-installer:Migri de tutmonda npm-instalo al loka instalo'
+    'setup-token:Agordi longdaŭran aŭtentikigan ĵetonon (bezonas Claude-abonon)'
+    'doctor:Sankontrolo por Claude Code aŭtomata ĝisdatigilo'
+    'update:Kontroli kaj instali ĝisdatigojn'
+    'install:Instali Claude Code denaskan kompilitan version'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Ŝalti erarserĉan reĝimon kun opcia kategoria filtrado (ekz., "api,hooks" aŭ "!statsig,!file")]:filtrilo:'
+    '--verbose[Anstataŭigi detaleman reĝimon de agorda dosiero]'
+    '(-p --print)'{-p,--print}'[Presi respondon kaj eliri (por uzo kun tuboj). Noto: uzu nur en fidindaj dosierujoj]'
+    '--output-format[Elir-formato (kun --print): "text" (defaŭlto), "json" (unu rezulto), aŭ "stream-json" (realtempa fluado)]:formato:(text json stream-json)'
+    '--json-schema[JSON-skemo por struktura elir-validigo]:skemo:'
+    '--include-partial-messages[Inkluzivi partajn mesaĝ-fragmentojn kiam ili alvenas (kun --print kaj --output-format=stream-json)]'
+    '--input-format[Enig-formato (kun --print): "text" (defaŭlto) aŭ "stream-json" (realtempa fluada enigo)]:formato:(text stream-json)'
+    '--mcp-debug[\[Malrekomendita. Uzu --debug anstataŭe\] Ŝalti MCP erarserĉan reĝimon (montras MCP-servil-erarojn)]'
+    '--dangerously-skip-permissions[Preterpasi ĉiujn permesajn kontrolojn. Rekomendata nur por sablujeloj sen interreta aliro]'
+    '--allow-dangerously-skip-permissions[Ebligi opcion por preterpasi permesajn kontrolojn sen ebligi defaŭlte]'
+    '--replay-user-messages[Resendi uzant-mesaĝojn de stdin al stdout por konfirmo]'
+    '--allowed-tools[Komo- aŭ spac-apartigita listo de permesitaj ilnomoj (ekz., "Bash(git:*) Edit")]:iloj:'
+    '--allowedTools[Komo- aŭ spac-apartigita listo de permesitaj ilnomoj (camelCase-formato)]:iloj:'
+    '--tools[Specifi liston de disponeblaj iloj el enkonstruita aro. Nur presa reĝimo]:iloj:'
+    '--disallowed-tools[Komo- aŭ spac-apartigita listo de malpermesitaj ilnomoj (ekz., "Bash(git:*) Edit")]:iloj:'
+    '--disallowedTools[Komo- aŭ spac-apartigita listo de malpermesitaj ilnomoj (camelCase-formato)]:iloj:'
+    '--mcp-config[Ŝargi MCP-servilojn el JSON-dosiero aŭ ĉeno (spac-apartigita)]:agordoj:'
+    '--system-prompt[Sistema invito por uzi en seanco]:invito:'
+    '--append-system-prompt[Aldoni sisteman inviton al defaŭlta sistema invito]:invito:'
+    '--permission-mode[Permesa reĝimo por uzi en seanco]:reĝimo:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Daŭrigi la plej freŝan konversacion]'
+    '(-r --resume)'{-r,--resume}'[Rekomenci konversacion - specifi seanc-identigilon aŭ elekti interaktive]:seancID:_claude_sessions'
+    '--fork-session[Krei novan seanc-identigilon anstataŭ reuzi originalan seanc-identigilon dum rekomencado (kun --resume aŭ --continue)]'
+    '--model[Modelo por nuna seanco. Specifi kromnomon por plej freŝa modelo (ekz., '\''sonnet'\'' aŭ '\''opus'\'')]:modelo:'
+    '--fallback-model[Ebligi aŭtomatan retropaŝon al specifita modelo kiam defaŭlta modelo estas tro ŝarĝita (--print nur)]:modelo:'
+    '--settings[Vojo al agorda JSON-dosiero aŭ JSON-ĉeno por ŝargi pliajn agordojn]:dosiero-aŭ-json:_files'
+    '--add-dir[Pliaj dosierujoj por permesi ilan aliron]:dosierujoj:_directories'
+    '--ide[Aŭtomate konekti al IDE dum startigado se precize unu valida IDE estas disponebla]'
+    '--strict-mcp-config[Uzi nur MCP-servilojn el --mcp-config kaj ignori ĉiujn aliajn MCP-agordojn]'
+    '--session-id[Specifa seanc-identigilo por uzi en konversacio (devas esti valida UUID)]:uuid:'
+    '--agents[JSON-objekto difinanta proprajn agentojn]:json:'
+    '--setting-sources[Komo-apartigita listo de agord-fontoj por ŝargi (user, project, local)]:fontoj:'
+    '--plugin-dir[Dosierujo por ŝargi kromaĵojn nur por ĉi tiu seanco (ripetebla)]:vojoj:_directories'
+    '(-v --version)'{-v,--version}'[Eligi version-numeron]'
+    '(-h --help)'{-h,--help}'[Montri helpon por komando]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude-komandoj' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "neniuj argumentoj"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Startigi Claude Code MCP-servilon'
+    'add:Aldoni MCP-servilon al Claude Code'
+    'remove:Forigi MCP-servilon'
+    'list:Listigi agordinitajn MCP-servilojn'
+    'get:Akiri MCP-servil-detalojn'
+    'add-json:Aldoni MCP-servilon (stdio aŭ SSE) kun JSON-ĉeno'
+    'add-from-claude-desktop:Importi MCP-servilojn el Claude Desktop (nur Mac kaj WSL)'
+    'reset-project-choices:Reagordi ĉiujn aprobitan/malakceptitan projekt-ampleksan (.mcp.json) servilojn en ĉi tiu projekto'
+    'help:Montri helpon'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Montri helpon]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp-komandoj' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Ŝalti erarserĉan reĝimon]' \
+            '--verbose[Anstataŭigi detaleman reĝimon de agorda dosiero]' \
+            '(-h --help)'{-h,--help}'[Montri helpon]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Agord-amplekso (local, user, project)]:amplekso:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Transport-tipo (stdio, sse, http)]:transporto:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Agordi medivariablon (ekz., -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Agordi WebSocket-kapon]:kapo:' \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:nomo:' \
+            '2:komandoAŭUrl:' \
+            '*:argumentoj:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Agord-amplekso (local, user, project) - forigi el ekzistanta amplekso se nespecifita]:amplekso:(local user project)' \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:nomo:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:nomo:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Agord-amplekso (local, user, project)]:amplekso:(local user project)' \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:nomo:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Agord-amplekso (local, user, project)]:amplekso:(local user project)' \
+            '(-h --help)'{-h,--help}'[Montri helpon]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Validigi kromaĵon aŭ merkat-manifeston'
+    'marketplace:Administri Claude Code merkatojn'
+    'install:Instali kromaĵon el disponeblaj merkatoj'
+    'i:Instali kromaĵon el disponeblaj merkatoj (mallongigo por install)'
+    'uninstall:Malinstali instalitan kromaĵon'
+    'remove:Malinstali instalitan kromaĵon (kromnomo por uninstall)'
+    'enable:Ŝalti malŝaltitan kromaĵon'
+    'disable:Malŝalti ŝaltitan kromaĵon'
+    'help:Montri helpon'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Montri helpon]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin-komandoj' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:vojo:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:kromaĵo:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:kromaĵo:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:kromaĵo:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Aldoni merkaton el URL, vojo, aŭ GitHub-deponejo'
+    'list:Listigi agordinitajn merkatojn'
+    'remove:Forigi agordinitan merkaton'
+    'rm:Forigi agordinitan merkaton (kromnomo por remove)'
+    'update:Ĝisdatigi merkaton el fonto - ĝisdatigi ĉion se neniu nomo specifita'
+    'help:Montri helpon'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Montri helpon]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace-komandoj' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:fonto:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '1:nomo:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Montri helpon]' \
+            '::nomo:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Devigi instalon eĉ se jam instalita]' \
+    '(-h --help)'{-h,--help}'[Montri helpon]' \
+    '::celo:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

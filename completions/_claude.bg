@@ -1,0 +1,336 @@
+#compdef claude
+
+# Динамични функции за автоматично попълване
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # Четене директно от конфигурационни файлове вместо изпълнение на 'claude mcp list'
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # Извличане на имена на сървъри от JSON (секция mcpServers)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Резервен вариант: claude mcp list, ако анализът на конфигурацията не успее
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp сървъри' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Проверка на директории за плъгини директно
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Премахване на дубликати
+  plugins=(${(u)plugins})
+
+  _describe 'инсталирани плъгини' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Проверка на директория за сесии
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # Извличане на UUID директно от имена на файлове
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Филтриране само на валидни UUID
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'идентификатори на сесии' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:Конфигуриране и управление на MCP сървъри'
+    'plugin:Управление на плъгини на Claude Code'
+    'migrate-installer:Мигриране от глобална npm инсталация към локална инсталация'
+    'setup-token:Настройване на токен за дългосрочна автентикация (изисква Claude абонамент)'
+    'doctor:Проверка на здравето на системата за автоматично обновяване на Claude Code'
+    'update:Проверка и инсталиране на актуализации'
+    'install:Инсталиране на нативна версия на Claude Code'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Активиране на режим за отстраняване на грешки с опционално филтриране по категории (напр. "api,hooks" или "!statsig,!file")]:filter:'
+    '--verbose[Презаписване на настройката за подробен режим от конфигурационния файл]'
+    '(-p --print)'{-p,--print}'[Извеждане на отговор и изход (за използване с pipe). Забележка: използвайте само в доверени директории]'
+    '--output-format[Формат на изхода (с --print): "text" (по подразбиране), "json" (единичен резултат), или "stream-json" (потоково предаване в реално време)]:format:(text json stream-json)'
+    '--json-schema[JSON схема за валидиране на структуриран изход]:schema:'
+    '--include-partial-messages[Включване на частични фрагменти от съобщения при тяхното пристигане (с --print и --output-format=stream-json)]'
+    '--input-format[Формат на входа (с --print): "text" (по подразбиране) или "stream-json" (потоково въвеждане в реално време)]:format:(text stream-json)'
+    '--mcp-debug[\[Остаряло. Използвайте --debug вместо това\] Активиране на режим за отстраняване на грешки на MCP (показва грешки на MCP сървъра)]'
+    '--dangerously-skip-permissions[Заобикаляне на всички проверки за разрешения. Препоръчително само за изолирани среди без интернет достъп]'
+    '--allow-dangerously-skip-permissions[Активиране на опция за заобикаляне на проверки за разрешения без активиране по подразбиране]'
+    '--replay-user-messages[Повторно изпращане на потребителски съобщения от stdin към stdout за потвърждение]'
+    '--allowed-tools[Списък на разрешени имена на инструменти разделени със запетая или интервал (напр. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[Списък на разрешени имена на инструменти разделени със запетая или интервал (формат camelCase)]:tools:'
+    '--tools[Указване на списък с налични инструменти от вградения набор. Само в режим print]:tools:'
+    '--disallowed-tools[Списък на забранени имена на инструменти разделени със запетая или интервал (напр. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[Списък на забранени имена на инструменти разделени със запетая или интервал (формат camelCase)]:tools:'
+    '--mcp-config[Зареждане на MCP сървъри от JSON файл или низ (разделени с интервали)]:configs:'
+    '--system-prompt[Системен промпт за използване в сесията]:prompt:'
+    '--append-system-prompt[Добавяне на системен промпт към стандартния системен промпт]:prompt:'
+    '--permission-mode[Режим на разрешения за използване в сесията]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[Продължаване на последния разговор]'
+    '(-r --resume)'{-r,--resume}'[Възобновяване на разговор - укажете идентификатор на сесия или изберете интерактивно]:sessionId:_claude_sessions'
+    '--fork-session[Създаване на нов идентификатор на сесия вместо повторно използване на оригиналния при възобновяване (с --resume или --continue)]'
+    '--model[Модел за текущата сесия. Укажете псевдоним за най-новия модел (напр. '\''sonnet'\'' или '\''opus'\'')]:model:'
+    '--fallback-model[Активиране на автоматично превключване към указания модел когато моделът по подразбиране е претоварен (само --print)]:model:'
+    '--settings[Път към JSON файл с настройки или JSON низ за зареждане на допълнителни настройки]:file-or-json:_files'
+    '--add-dir[Допълнителни директории за предоставяне на достъп на инструменти]:directories:_directories'
+    '--ide[Автоматично свързване към IDE при стартиране ако е налична точно една валидна IDE]'
+    '--strict-mcp-config[Използване само на MCP сървъри от --mcp-config и игнориране на всички други MCP настройки]'
+    '--session-id[Конкретен идентификатор на сесия за използване в разговора (трябва да е валиден UUID)]:uuid:'
+    '--agents[JSON обект дефиниращ потребителски агенти]:json:'
+    '--setting-sources[Списък на източници на настройки разделени със запетая за зареждане (user, project, local)]:sources:'
+    '--plugin-dir[Директория за зареждане на плъгини само за тази сесия (може да се повтаря)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Извеждане на номер на версия]'
+    '(-h --help)'{-h,--help}'[Показване на помощ за команда]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'команди на claude' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "без аргументи"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Стартиране на MCP сървър на Claude Code'
+    'add:Добавяне на MCP сървър към Claude Code'
+    'remove:Премахване на MCP сървър'
+    'list:Показване на списък с конфигурирани MCP сървъри'
+    'get:Получаване на детайли за MCP сървър'
+    'add-json:Добавяне на MCP сървър (stdio или SSE) с JSON низ'
+    'add-from-claude-desktop:Импортиране на MCP сървъри от Claude Desktop (само Mac и WSL)'
+    'reset-project-choices:Нулиране на всички одобрени/отхвърлени сървъри с обхват на проект (.mcp.json) в този проект'
+    'help:Показване на помощ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Показване на помощ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'команди на mcp' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Активиране на режим за отстраняване на грешки]' \
+            '--verbose[Презаписване на настройката за подробен режим от конфигурационния файл]' \
+            '(-h --help)'{-h,--help}'[Показване на помощ]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Обхват на конфигурация (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Тип транспорт (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Задаване на променлива на средата (напр. -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[Задаване на WebSocket заглавка]:header:' \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Обхват на конфигурация (local, user, project) - премахване от съществуващ обхват ако не е указано]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Обхват на конфигурация (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Обхват на конфигурация (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Показване на помощ]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Валидиране на плъгин или манифест на маркетплейс'
+    'marketplace:Управление на маркетплейси на Claude Code'
+    'install:Инсталиране на плъгин от налични маркетплейси'
+    'i:Инсталиране на плъгин от налични маркетплейси (съкращение за install)'
+    'uninstall:Деинсталиране на инсталиран плъгин'
+    'remove:Деинсталиране на инсталиран плъгин (псевдоним за uninstall)'
+    'enable:Активиране на деактивиран плъгин'
+    'disable:Деактивиране на активиран плъгин'
+    'help:Показване на помощ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Показване на помощ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'команди на plugin' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:Добавяне на маркетплейс от URL, път или GitHub хранилище'
+    'list:Показване на списък с конфигурирани маркетплейси'
+    'remove:Премахване на конфигуриран маркетплейс'
+    'rm:Премахване на конфигуриран маркетплейс (псевдоним за remove)'
+    'update:Актуализиране на маркетплейс от източника - актуализиране на всички ако името не е указано'
+    'help:Показване на помощ'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Показване на помощ]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'команди на marketplace' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Показване на помощ]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Принудителна инсталация дори ако вече е инсталирано]' \
+    '(-h --help)'{-h,--help}'[Показване на помощ]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude

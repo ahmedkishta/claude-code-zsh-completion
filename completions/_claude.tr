@@ -1,0 +1,336 @@
+#compdef claude
+
+# Dinamik tamamlama fonksiyonları
+_claude_mcp_servers() {
+  local servers config_file
+  local -a server_list
+
+  # 'claude mcp list' çalıştırmak yerine doğrudan yapılandırma dosyalarından oku
+  for config_file in ~/.claude/mcp.json ~/.claude.json ~/.config/claude/mcp.json; do
+    [[ -f "$config_file" ]] || continue
+
+    # JSON'dan sunucu isimlerini çıkar (mcpServers bölümü)
+    servers=$(grep -oP '(?<="mcpServers":\s*\{)[^}]+' "$config_file" 2>/dev/null | \
+              grep -oP '(?<=")[^"]+(?="\s*:)' 2>/dev/null)
+
+    [[ -n "$servers" ]] && server_list+=(${(f)servers})
+  done
+
+  # Yapılandırma ayrıştırma başarısız olursa claude mcp list'e geri dön
+  if [[ ${#server_list[@]} -eq 0 ]]; then
+    server_list=(${(f)"$(claude mcp list 2>/dev/null | sed -n 's/^\([^:]*\):.*/\1/p' | grep -v '^Checking')"})
+  fi
+
+  _describe 'mcp sunucuları' server_list
+}
+
+_claude_installed_plugins() {
+  local -a plugins
+  local config_file plugin_dir
+
+  # Eklenti dizinlerini doğrudan kontrol et
+  for plugin_dir in ~/.claude/plugins ~/.config/claude/plugins; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugins+=(${plugin_dir}/*(N:t))
+  done
+
+  # Tekrarları kaldır
+  plugins=(${(u)plugins})
+
+  _describe 'kurulu eklentiler' plugins
+}
+
+_claude_sessions() {
+  local -a sessions
+  local session_dir
+
+  # Oturum dizinini kontrol et
+  for session_dir in ~/.claude/sessions ~/.config/claude/sessions; do
+    [[ -d "$session_dir" ]] || continue
+
+    # UUID'leri doğrudan dosya isimlerinden çıkar
+    sessions+=(${session_dir}/*~*.zwc(N:t:r))
+  done
+
+  # Sadece geçerli UUID'leri filtrele
+  sessions=(${(M)sessions:#[0-9a-f](#c8)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c4)-[0-9a-f](#c12)})
+
+  _describe 'oturum kimlikleri' sessions
+}
+
+_claude() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a main_commands
+  main_commands=(
+    'mcp:MCP sunucularını yapılandır ve yönet'
+    'plugin:Claude Code eklentilerini yönet'
+    'migrate-installer:Global npm kurulumundan yerel kuruluma geçiş yap'
+    'setup-token:Uzun süreli kimlik doğrulama belirteci ayarla (Claude aboneliği gerektirir)'
+    'doctor:Claude Code otomatik güncelleyicisi için sağlık kontrolü'
+    'update:Güncellemeleri kontrol et ve kur'
+    'install:Claude Code yerel derlemesini kur'
+  )
+
+  local -a main_options
+  main_options=(
+    '(-d --debug)'{-d,--debug}'[Opsiyonel kategori filtreleme ile hata ayıklama modunu etkinleştir (örn. "api,hooks" veya "!statsig,!file")]:filter:'
+    '--verbose[Yapılandırma dosyasındaki ayrıntılı mod ayarını geçersiz kıl]'
+    '(-p --print)'{-p,--print}'[Yanıtı yazdır ve çık (pipe kullanımı için). Not: yalnızca güvenilir dizinlerde kullanın]'
+    '--output-format[Çıktı formatı (--print ile): "text" (varsayılan), "json" (tek sonuç), veya "stream-json" (gerçek zamanlı akış)]:format:(text json stream-json)'
+    '--json-schema[Yapılandırılmış çıktı doğrulaması için JSON şeması]:schema:'
+    '--include-partial-messages[Kısmi mesaj parçalarını geldikçe dahil et (--print ve --output-format=stream-json ile)]'
+    '--input-format[Girdi formatı (--print ile): "text" (varsayılan) veya "stream-json" (gerçek zamanlı akış girişi)]:format:(text stream-json)'
+    '--mcp-debug[\[Kullanımdan kaldırıldı. Bunun yerine --debug kullanın\] MCP hata ayıklama modunu etkinleştir (MCP sunucu hatalarını gösterir)]'
+    '--dangerously-skip-permissions[Tüm izin kontrollerini atla. Yalnızca internet erişimi olmayan korumalı alanlar için önerilir]'
+    '--allow-dangerously-skip-permissions[Varsayılan olarak etkinleştirmeden izin kontrollerini atlama seçeneğini etkinleştir]'
+    '--replay-user-messages[Onay için stdin üzerinden kullanıcı mesajlarını stdout üzerine yeniden gönder]'
+    '--allowed-tools[İzin verilen araç isimlerinin virgül veya boşlukla ayrılmış listesi (örn. "Bash(git:*) Edit")]:tools:'
+    '--allowedTools[İzin verilen araç isimlerinin virgül veya boşlukla ayrılmış listesi (camelCase formatı)]:tools:'
+    '--tools[Yerleşik setten kullanılabilir araçların listesini belirt. Yalnızca yazdırma modu]:tools:'
+    '--disallowed-tools[İzin verilmeyen araç isimlerinin virgül veya boşlukla ayrılmış listesi (örn. "Bash(git:*) Edit")]:tools:'
+    '--disallowedTools[İzin verilmeyen araç isimlerinin virgül veya boşlukla ayrılmış listesi (camelCase formatı)]:tools:'
+    '--mcp-config[MCP sunucularını JSON dosyasından veya dizeden yükle (boşlukla ayrılmış)]:configs:'
+    '--system-prompt[Oturum için kullanılacak sistem istemi]:prompt:'
+    '--append-system-prompt[Varsayılan sistem istemine sistem istemi ekle]:prompt:'
+    '--permission-mode[Oturum için kullanılacak izin modu]:mode:(acceptEdits bypassPermissions default dontAsk plan)'
+    '(-c --continue)'{-c,--continue}'[En son konuşmaya devam et]'
+    '(-r --resume)'{-r,--resume}'[Bir konuşmayı sürdür - oturum kimliği belirt veya etkileşimli seç]:sessionId:_claude_sessions'
+    '--fork-session[Sürdürürken orijinal oturum kimliğini yeniden kullanmak yerine yeni oturum kimliği oluştur (--resume veya --continue ile)]'
+    '--model[Mevcut oturum için model. En son model için takma ad belirt (örn. '\''sonnet'\'' veya '\''opus'\'')]:model:'
+    '--fallback-model[Varsayılan model aşırı yüklendiğinde belirtilen modele otomatik geri dönüşü etkinleştir (yalnızca --print)]:model:'
+    '--settings[Ek ayarları yüklemek için ayarlar JSON dosyasının yolu veya JSON dizesi]:file-or-json:_files'
+    '--add-dir[Araç erişimine izin verilecek ek dizinler]:directories:_directories'
+    '--ide[Tam olarak bir geçerli IDE mevcutsa başlangıçta IDE ile otomatik bağlan]'
+    '--strict-mcp-config[Yalnızca --mcp-config üzerinden MCP sunucularını kullan ve diğer tüm MCP ayarlarını yoksay]'
+    '--session-id[Konuşma için kullanılacak belirli oturum kimliği (geçerli UUID olmalı)]:uuid:'
+    '--agents[Özel ajanları tanımlayan JSON nesnesi]:json:'
+    '--setting-sources[Yüklenecek ayar kaynaklarının virgülle ayrılmış listesi (user, project, local)]:sources:'
+    '--plugin-dir[Yalnızca bu oturum için eklentilerin yükleneceği dizin (tekrarlanabilir)]:paths:_directories'
+    '(-v --version)'{-v,--version}'[Sürüm numarasını göster]'
+    '(-h --help)'{-h,--help}'[Komut için yardım göster]'
+  )
+
+  _arguments -C \
+    $main_options \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude komutları' main_commands
+      ;;
+    args)
+      case $words[1] in
+        mcp)
+          _claude_mcp
+          ;;
+        plugin)
+          _claude_plugin
+          ;;
+        install)
+          _claude_install
+          ;;
+        migrate-installer|setup-token|doctor|update)
+          _message "argüman yok"
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_mcp() {
+  local -a mcp_commands
+  mcp_commands=(
+    'serve:Claude Code MCP sunucusu başlat'
+    'add:Claude Code içine bir MCP sunucusu ekle'
+    'remove:Bir MCP sunucusunu kaldır'
+    'list:Yapılandırılmış MCP sunucularını listele'
+    'get:MCP sunucu detaylarını al'
+    'add-json:JSON dizesi ile bir MCP sunucusu (stdio veya SSE) ekle'
+    'add-from-claude-desktop:Claude Desktop uygulamasından MCP sunucularını içe aktar (yalnızca Mac ve WSL)'
+    'reset-project-choices:Bu projedeki tüm onaylanmış/reddedilmiş proje kapsamlı (.mcp.json) sunucuları sıfırla'
+    'help:Yardım göster'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Yardım göster]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'mcp komutları' mcp_commands
+      ;;
+    args)
+      case $words[1] in
+        serve)
+          _arguments \
+            '(-d --debug)'{-d,--debug}'[Hata ayıklama modunu etkinleştir]' \
+            '--verbose[Yapılandırma dosyasındaki ayrıntılı mod ayarını geçersiz kıl]' \
+            '(-h --help)'{-h,--help}'[Yardım göster]'
+          ;;
+        add)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Yapılandırma kapsamı (local, user, project)]:scope:(local user project)' \
+            '(-t --transport)'{-t,--transport}'[Taşıma türü (stdio, sse, http)]:transport:(stdio sse http)' \
+            '(-e --env)'{-e,--env}'[Ortam değişkeni ayarla (örn. -e KEY=value)]:env:' \
+            '(-H --header)'{-H,--header}'[WebSocket başlığı ayarla]:header:' \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:name:' \
+            '2:commandOrUrl:' \
+            '*:args:'
+          ;;
+        remove)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Yapılandırma kapsamı (local, user, project) - belirtilmezse mevcut kapsamdan kaldır]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]'
+          ;;
+        get)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:name:_claude_mcp_servers'
+          ;;
+        add-json)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Yapılandırma kapsamı (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:name:' \
+            '2:json:'
+          ;;
+        add-from-claude-desktop)
+          _arguments \
+            '(-s --scope)'{-s,--scope}'[Yapılandırma kapsamı (local, user, project)]:scope:(local user project)' \
+            '(-h --help)'{-h,--help}'[Yardım göster]'
+          ;;
+        reset-project-choices)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin() {
+  local -a plugin_commands
+  plugin_commands=(
+    'validate:Bir eklenti veya pazar yeri bildirimini doğrula'
+    'marketplace:Claude Code pazar yerlerini yönet'
+    'install:Mevcut pazar yerlerinden bir eklenti kur'
+    'i:Mevcut pazar yerlerinden bir eklenti kur (install için kısa form)'
+    'uninstall:Kurulu bir eklentiyi kaldır'
+    'remove:Kurulu bir eklentiyi kaldır (uninstall için takma ad)'
+    'enable:Devre dışı bir eklentiyi etkinleştir'
+    'disable:Etkin bir eklentiyi devre dışı bırak'
+    'help:Yardım göster'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Yardım göster]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'plugin komutları' plugin_commands
+      ;;
+    args)
+      case $words[1] in
+        validate)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:path:_files'
+          ;;
+        marketplace)
+          _claude_plugin_marketplace
+          ;;
+        install|i)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:plugin:'
+          ;;
+        uninstall|remove)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+        enable|disable)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:plugin:_claude_installed_plugins'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_plugin_marketplace() {
+  local -a marketplace_commands
+  marketplace_commands=(
+    'add:URL, yol veya GitHub deposundan bir pazar yeri ekle'
+    'list:Yapılandırılmış pazar yerlerini listele'
+    'remove:Yapılandırılmış bir pazar yerini kaldır'
+    'rm:Yapılandırılmış bir pazar yerini kaldır (remove için takma ad)'
+    'update:Pazar yerini kaynaktan güncelle - isim belirtilmezse tümünü güncelle'
+    'help:Yardım göster'
+  )
+
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Yardım göster]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'marketplace komutları' marketplace_commands
+      ;;
+    args)
+      case $words[1] in
+        add)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:source:'
+          ;;
+        list)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]'
+          ;;
+        remove|rm)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '1:name:'
+          ;;
+        update)
+          _arguments \
+            '(-h --help)'{-h,--help}'[Yardım göster]' \
+            '::name:'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_claude_install() {
+  _arguments \
+    '--force[Zaten kurulu olsa bile kurulumu zorla]' \
+    '(-h --help)'{-h,--help}'[Yardım göster]' \
+    '::target:(stable latest)'
+}
+
+(( $+_comps[claude] )) || compdef _claude claude
